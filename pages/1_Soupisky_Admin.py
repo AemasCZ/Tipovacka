@@ -29,7 +29,7 @@ st.set_page_config(page_title="Soupisky (Admin)", page_icon="🧾")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
 if not SUPABASE_URL or not SUPABASE_ANON_KEY:
-    st.error("Chybí SUPABASE_URL nebo SUPABASE_ANON_KEY v .env")
+    st.error("Chybí SUPABASE_URL nebo SUPABASE_ANON_KEY")
     st.stop()
 
 supabase = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
@@ -51,7 +51,6 @@ if not user:
         st.switch_page("app.py")
     st.stop()
 
-# Pokud máš RLS, bez tokenů to může padat
 if not st.session_state.get("access_token") or not st.session_state.get("refresh_token"):
     st.error("Chybí session tokeny. Odhlas se a přihlas znovu.")
     st.stop()
@@ -59,13 +58,14 @@ if not st.session_state.get("access_token") or not st.session_state.get("refresh
 user_id = user["id"]
 
 # =====================
-# Ověření admina přes profiles.is_admin
+# ✅ Ověření admina přes profiles.is_admin
+# POZOR: v DB máš sloupec `user_id`, ne `id`
 # =====================
 try:
     prof = (
         supabase.table("profiles")
         .select("email, is_admin")
-        .eq("id", user_id)
+        .eq("user_id", user_id)
         .single()
         .execute()
     )
@@ -97,8 +97,6 @@ raw_text = st.text_area(
     height=220,
 )
 
-# Mapování 3-letter kódů na roli vlajky (ISO2 pro emoji vlajky)
-# (emoji vlajku v DB nepotřebujeme ukládat – jen ji ty chceš v textovém výpisu)
 COUNTRY_3_TO_2 = {
     "ITA": "IT",
     "GER": "DE",
@@ -108,21 +106,12 @@ COUNTRY_3_TO_2 = {
 }
 
 def parse_players(text: str):
-    """
-    Vytáhne hráče z textu ve formátu:
-    Defenders: Name (Team, CODE), Name (Team, CODE).
-    Forwards: ...
-    Vrací list dictů: {full_name, team_name, role}
-    """
     if not text:
         return []
 
-    # normalizace whitespace
     t = " ".join(text.replace("\n", " ").split())
-
     out = []
 
-    # vysekneme sekce defenders/forwards (nevadí když jedna chybí)
     def_section = ""
     fwd_section = ""
 
@@ -134,7 +123,6 @@ def parse_players(text: str):
     if m_fwd:
         fwd_section = m_fwd.group(1).strip()
 
-    # pattern: Name (Team, CODE)
     pattern = re.compile(r"([^()]+?)\s*\(([^,]+?),\s*([A-Z]{3})\)")
 
     def add_section(section_text: str, role: str):
@@ -143,7 +131,6 @@ def parse_players(text: str):
         for name, team, code3 in pattern.findall(section_text):
             full_name = name.strip().rstrip(",")
             team_raw = team.strip()
-            # role je ATT / DEF do DB
             out.append(
                 {
                     "full_name": full_name,
@@ -155,14 +142,12 @@ def parse_players(text: str):
 
     add_section(def_section, "DEF")
     add_section(fwd_section, "ATT")
-
     return out
 
 def flag_from_country3(code3: str) -> str:
     iso2 = COUNTRY_3_TO_2.get(code3)
     if not iso2:
         return "🏳️"
-    # převod ISO2 -> emoji vlajka
     return "".join(chr(ord(c) + 127397) for c in iso2)
 
 if st.button("🔎 Parse & náhled", type="secondary"):
@@ -175,7 +160,6 @@ if st.button("🔎 Parse & náhled", type="secondary"):
         else:
             st.success(f"Nalezeno hráčů: {len(parsed)}")
             st.markdown("#### Náhled (tak jak to chceš ty)")
-            # tisk pro tebe: Jméno (Tým 🇨🇿)
             for p in parsed:
                 fl = flag_from_country3(p["country3"])
                 st.write(f"- {p['full_name']} ({p['team_name']} {fl}) — {('Útočník' if p['role']=='ATT' else 'Obránce')}")
@@ -189,17 +173,12 @@ if st.button("💾 Uložit do databáze", type="primary"):
         st.error("Vyplň team_name (musí sedět s názvem týmu v matches).")
         st.stop()
 
-    parsed = st.session_state.get("parsed_players_cache")
-    if not parsed:
-        # fallback: když uživatel rovnou klikne bez náhledu
-        parsed = parse_players(raw_text)
+    parsed = st.session_state.get("parsed_players_cache") or parse_players(raw_text)
 
     if not parsed:
         st.error("Nemám co uložit (nejdřív vlož text a dej Parse & náhled).")
         st.stop()
 
-    # Pozor: v textu může být tým různý (protože hráči hrají v různých klubech)
-    # Ty ale chceš soupisku pro konkrétní tým => přepíšeme team_name na hodnotu z inputu
     payload = []
     for p in parsed:
         payload.append(
@@ -213,10 +192,7 @@ if st.button("💾 Uložit do databáze", type="primary"):
         )
 
     try:
-        # (volitelně) smažeme starou soupisku toho týmu a vložíme novou
         supabase.table("players").delete().eq("team_name", team_name.strip()).execute()
-
-        # vložíme novou
         supabase.table("players").insert(payload).execute()
 
         st.success(f"Uloženo ✅ Soupiska týmu '{team_name.strip()}' byla přepsána ({len(payload)} hráčů).")
