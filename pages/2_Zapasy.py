@@ -1,13 +1,12 @@
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 
 import streamlit as st
 from supabase import create_client
 from dotenv import load_dotenv
 
-
 # =====================
-# CSS (dark + drobný styling tlačítek v pickeru)
+# CSS – schová default Streamlit navigaci + header
 # =====================
 st.markdown(
     """
@@ -15,51 +14,135 @@ st.markdown(
         header[data-testid="stHeader"] { display: none; }
         [data-testid="stSidebarNav"] { display: none; }
 
-        .picker-title {
-            font-size: 18px;
-            font-weight: 700;
-            margin-bottom: 6px;
-        }
-        .picker-subtitle {
-            font-size: 13px;
-            opacity: 0.8;
-            margin-top: -4px;
-            margin-bottom: 10px;
-        }
-        .picker-section {
-            font-size: 14px;
-            font-weight: 700;
-            margin-top: 10px;
-            margin-bottom: 6px;
-            opacity: 0.95;
-        }
-        .picker-gap {
-            height: 10px;
+        /* Hezčí expander */
+        div[data-testid="stExpander"] details {
+            border-radius: 14px;
+            border: 1px solid rgba(255,255,255,0.12);
+            background: rgba(255,255,255,0.02);
+            padding: 6px 10px;
         }
 
-        /* trochu zmenšit Streamlit buttony v seznamu hráčů */
-        div.stButton > button {
+        /* Menší vertikální mezery mezi buttony v gridu */
+        div[data-testid="column"] button[kind="secondary"]{
             width: 100%;
-            text-align: left;
-            padding: 10px 12px;
-            border-radius: 10px;
         }
     </style>
     """,
-    unsafe_allow_html=True,
+    unsafe_allow_html=True
 )
 
 # =====================
-# Flag helpers (30 hokejových zemí – ISO3 -> ISO2 -> emoji)
+# Nastavení stránky
 # =====================
-TOP_HOCKEY_ISO3_TO_ISO2 = {
+load_dotenv()
+st.set_page_config(page_title="Zápasy", page_icon="🏒")
+
+# =====================
+# Supabase klient
+# =====================
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+    st.error("Chybí SUPABASE_URL nebo SUPABASE_ANON_KEY v .env / Secrets")
+    st.stop()
+
+supabase = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+
+# ✅ Navázání session (nutné pro RLS)
+if st.session_state.get("access_token") and st.session_state.get("refresh_token"):
+    supabase.auth.set_session(
+        st.session_state["access_token"],
+        st.session_state["refresh_token"],
+    )
+
+# =====================
+# Sidebar – vlastní menu
+# =====================
+with st.sidebar:
+    st.markdown("## 🏒 Tipovačka")
+    st.page_link("pages/2_Zapasy.py", label="🏒 Zápasy")
+    st.page_link("pages/3_Leaderboard.py", label="🏆 Leaderboard")
+    st.markdown("---")
+
+    if st.button("🚪 Odhlásit se"):
+        st.session_state.clear()
+        st.switch_page("app.py")
+
+# =====================
+# Guard: musí být přihlášený
+# =====================
+user = st.session_state.get("user")
+if not user:
+    st.warning("Nejsi přihlášený. Jdi do Login.")
+    st.stop()
+
+if not st.session_state.get("access_token") or not st.session_state.get("refresh_token"):
+    st.error("Chybí session tokeny. Odhlas se a přihlas znovu.")
+    st.stop()
+
+user_id = user["id"]
+
+# =====================
+# Pomocné funkce
+# =====================
+def parse_dt(x: str):
+    try:
+        return datetime.fromisoformat(x.replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def iso2_flag(iso2: str) -> str:
+    if not iso2 or len(iso2) != 2:
+        return "🏳️"
+    iso2 = iso2.upper()
+    return "".join(chr(ord(c) + 127397) for c in iso2)
+
+
+# 30 “top” hokej zemí + pár aliasů (CZ/Česko atd.)
+COUNTRY_NAME_TO_ISO2 = {
+    # TOP
+    "Canada": "CA", "Kanada": "CA",
+    "United States": "US", "USA": "US", "United States of America": "US", "Spojené státy": "US",
+    "Sweden": "SE", "Švédsko": "SE", "Svedsko": "SE",
+    "Finland": "FI", "Finsko": "FI",
+    "Czechia": "CZ", "Czech Republic": "CZ", "Česko": "CZ", "Cesko": "CZ",
+    "Slovakia": "SK", "Slovensko": "SK",
+    "Russia": "RU", "Rusko": "RU",
+    "Switzerland": "CH", "Švýcarsko": "CH", "Svycarsko": "CH",
+    "Germany": "DE", "Německo": "DE", "Nemecko": "DE",
+    "Latvia": "LV", "Lotyšsko": "LV", "Lotyssko": "LV",
+    "Denmark": "DK", "Dánsko": "DK", "Dansko": "DK",
+    "Norway": "NO", "Norsko": "NO",
+    "Austria": "AT", "Rakousko": "AT",
+    "France": "FR", "Francie": "FR",
+    "Belarus": "BY", "Bělorusko": "BY", "Belorusko": "BY",
+    "Kazakhstan": "KZ", "Kazachstán": "KZ", "Kazachstan": "KZ",
+    "Slovenia": "SI", "Slovinsko": "SI",
+    "Italy": "IT", "Itálie": "IT", "Italie": "IT",
+    "Japan": "JP", "Japonsko": "JP",
+    "South Korea": "KR", "Korea": "KR", "Jižní Korea": "KR", "Jizni Korea": "KR",
+    "China": "CN", "Čína": "CN", "Cina": "CN",
+    "Great Britain": "GB", "United Kingdom": "GB", "Velká Británie": "GB", "Velka Britanie": "GB",
+    "Hungary": "HU", "Maďarsko": "HU", "Madarsko": "HU",
+    "Poland": "PL", "Polsko": "PL",
+    "Ukraine": "UA", "Ukrajina": "UA",
+    "Lithuania": "LT", "Litva": "LT",
+    "Netherlands": "NL", "Nizozemsko": "NL",
+    "Estonia": "EE", "Estonsko": "EE",
+    "Romania": "RO", "Rumunsko": "RO",
+    "Croatia": "HR", "Chorvatsko": "HR",
+}
+
+# 3-letter -> ISO2 (když máš v rosters kódy jako SWE/ITA)
+COUNTRY3_TO_ISO2 = {
     "CAN": "CA",
     "USA": "US",
     "SWE": "SE",
     "FIN": "FI",
-    "RUS": "RU",
     "CZE": "CZ",
     "SVK": "SK",
+    "RUS": "RU",
     "SUI": "CH",
     "GER": "DE",
     "LAT": "LV",
@@ -71,164 +154,51 @@ TOP_HOCKEY_ISO3_TO_ISO2 = {
     "KAZ": "KZ",
     "SLO": "SI",
     "ITA": "IT",
-    "POL": "PL",
-    "HUN": "HU",
-    "GBR": "GB",
     "JPN": "JP",
     "KOR": "KR",
     "CHN": "CN",
-    "NED": "NL",
-    "ROU": "RO",
-    "EST": "EE",
+    "GBR": "GB",
+    "HUN": "HU",
+    "POL": "PL",
     "UKR": "UA",
+    "NED": "NL",
+    "EST": "EE",
+    "ROU": "RO",
     "CRO": "HR",
-    "SRB": "RS",
+    "LTU": "LT",
 }
-
-# mapování názvů zemí (CZ + EN) -> ISO3 (pro vlajku nároďáku v UI)
-TEAM_NAME_TO_ISO3 = {
-    # CZ názvy
-    "Kanada": "CAN",
-    "USA": "USA",
-    "Spojené státy": "USA",
-    "Švédsko": "SWE",
-    "Finsko": "FIN",
-    "Rusko": "RUS",
-    "Česko": "CZE",
-    "Česká republika": "CZE",
-    "Slovensko": "SVK",
-    "Švýcarsko": "SUI",
-    "Německo": "GER",
-    "Lotyšsko": "LAT",
-    "Dánsko": "DEN",
-    "Norsko": "NOR",
-    "Rakousko": "AUT",
-    "Francie": "FRA",
-    "Bělorusko": "BLR",
-    "Kazachstán": "KAZ",
-    "Slovinsko": "SLO",
-    "Itálie": "ITA",
-    "Polsko": "POL",
-    "Maďarsko": "HUN",
-    "Velká Británie": "GBR",
-    "Japonsko": "JPN",
-    "Jižní Korea": "KOR",
-    "Korea": "KOR",
-    "Čína": "CHN",
-    "Nizozemsko": "NED",
-    "Rumunsko": "ROU",
-    "Estonsko": "EST",
-    "Ukrajina": "UKR",
-    "Chorvatsko": "CRO",
-    "Srbsko": "SRB",
-    # EN názvy (kdybys někde měl v DB angličtinu)
-    "Canada": "CAN",
-    "United States": "USA",
-    "Sweden": "SWE",
-    "Finland": "FIN",
-    "Russia": "RUS",
-    "Czechia": "CZE",
-    "Czech Republic": "CZE",
-    "Slovakia": "SVK",
-    "Switzerland": "SUI",
-    "Germany": "GER",
-    "Latvia": "LAT",
-    "Denmark": "DEN",
-    "Norway": "NOR",
-    "Austria": "AUT",
-    "France": "FRA",
-    "Belarus": "BLR",
-    "Kazakhstan": "KAZ",
-    "Slovenia": "SLO",
-    "Italy": "ITA",
-    "Poland": "POL",
-    "Hungary": "HUN",
-    "Great Britain": "GBR",
-    "United Kingdom": "GBR",
-    "Japan": "JPN",
-    "South Korea": "KOR",
-    "China": "CHN",
-    "Netherlands": "NED",
-    "Romania": "ROU",
-    "Estonia": "EST",
-    "Ukraine": "UKR",
-    "Croatia": "CRO",
-    "Serbia": "SRB",
-}
-
-def flag_from_iso2(iso2: str) -> str:
-    if not iso2 or len(iso2) != 2:
-        return "🏳️"
-    iso2 = iso2.upper()
-    return "".join(chr(ord(c) + 127397) for c in iso2)
-
-def flag_from_iso3(iso3: str) -> str:
-    iso2 = TOP_HOCKEY_ISO3_TO_ISO2.get((iso3 or "").upper())
-    return flag_from_iso2(iso2) if iso2 else "🏳️"
 
 def team_flag(team_name: str) -> str:
-    iso3 = TEAM_NAME_TO_ISO3.get(team_name)
-    return flag_from_iso3(iso3) if iso3 else "🏳️"
-
-def parse_dt(x: str) -> datetime:
-    # Supabase timestamp může přijít s "Z"
-    return datetime.fromisoformat(x.replace("Z", "+00:00"))
-
-def nice_time(dt: datetime) -> str:
-    # zobraz v lokálním čase prohlížeče (Streamlit to renderuje jako text)
-    return dt.astimezone().strftime("%H:%M")
+    iso2 = COUNTRY_NAME_TO_ISO2.get(team_name)
+    return iso2_flag(iso2) if iso2 else "🏳️"
 
 
-# =====================
-# App init
-# =====================
-load_dotenv()
-st.set_page_config(page_title="Zápasy", page_icon="🏒")
+def club_country_flag(country3: str | None) -> str:
+    if not country3:
+        return "🏳️"
+    iso2 = COUNTRY3_TO_ISO2.get(country3.upper())
+    return iso2_flag(iso2) if iso2 else "🏳️"
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
-if not SUPABASE_URL or not SUPABASE_ANON_KEY:
-    st.error("Chybí SUPABASE_URL nebo SUPABASE_ANON_KEY v Secrets.")
-    st.stop()
 
-supabase = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+def chunks(lst, n=3):
+    for i in range(0, len(lst), n):
+        yield lst[i:i+n]
 
-# navázání session (RLS)
-if st.session_state.get("access_token") and st.session_state.get("refresh_token"):
-    supabase.auth.set_session(
-        st.session_state["access_token"],
-        st.session_state["refresh_token"],
-    )
 
-# Sidebar
-with st.sidebar:
-    st.markdown("## 🏒 Tipovačka")
-    st.page_link("pages/2_Zapasy.py", label="🏒 Zápasy")
-    st.page_link("pages/3_Leaderboard.py", label="🏆 Leaderboard")
-    st.markdown("---")
-    if st.button("🚪 Odhlásit se"):
-        st.session_state.clear()
-        st.switch_page("app.py")
+def safe_get(d: dict, key: str, default=None):
+    try:
+        return d.get(key, default)
+    except Exception:
+        return default
 
-# Guard
-user = st.session_state.get("user")
-if not user:
-    st.warning("Nejsi přihlášený.")
-    if st.button("Jít na přihlášení"):
-        st.switch_page("app.py")
-    st.stop()
-
-if not st.session_state.get("access_token") or not st.session_state.get("refresh_token"):
-    st.error("Chybí session tokeny. Odhlas se a přihlas znovu.")
-    st.stop()
-
-user_id = user["id"]
-
-st.title("🏒 Zápasy")
 
 # =====================
-# 1) Načti zápasy
+# Čas a data
 # =====================
+now = datetime.now(timezone.utc)
+today = now.date()
+
+# 1) Načti všechny zápasy
 matches_res = (
     supabase.table("matches")
     .select("id, home_team, away_team, starts_at")
@@ -236,176 +206,268 @@ matches_res = (
     .execute()
 )
 matches = matches_res.data or []
+
 if not matches:
     st.info("V databázi nejsou žádné zápasy.")
     st.stop()
 
-# =====================
-# 2) Načti moje tipy
-# =====================
+# 2) Načti moje tipy (predictions) – přidáváme i střelce, když existuje
 pred_res = (
     supabase.table("predictions")
-    .select("match_id, home_score, away_score, scorer_player_id")
+    .select("match_id, home_score, away_score, scorer_player_id, scorer_name, scorer_flag, scorer_team")
     .eq("user_id", user_id)
     .execute()
 )
 preds = pred_res.data or []
 pred_by_match = {p["match_id"]: p for p in preds}
 
-# =====================
-# 3) Přednačti hráče pro všechny týmy v jednom dotazu
-# =====================
-teams = sorted({m["home_team"] for m in matches} | {m["away_team"] for m in matches})
-
-players_res = (
-    supabase.table("players")
-    .select("*")  # tolerantní – vezme i club_name/country3 pokud existují
-    .in_("team_name", teams)
-    .execute()
-)
-all_players = players_res.data or []
-
-players_by_team = {}
-for p in all_players:
-    players_by_team.setdefault(p.get("team_name"), []).append(p)
-
-def player_row_label(p: dict) -> str:
-    name = p.get("full_name", "").strip()
-    club = (p.get("club_name") or p.get("club") or p.get("club_team") or "").strip()
-    code3 = (p.get("country3") or p.get("league_code") or p.get("country_code3") or "").strip().upper()
-
-    # vlajka "země kde hraje" (podle kódu u klubu/ligy)
-    club_flag = flag_from_iso3(code3) if code3 else "🏳️"
-
-    if club:
-        return f"{name} — {club} {club_flag}"
-    return f"{name} {club_flag}"
-
-def split_by_role(players: list[dict]) -> tuple[list[dict], list[dict]]:
-    atts = [p for p in players if (p.get("role") or "").upper() == "ATT"]
-    defs = [p for p in players if (p.get("role") or "").upper() == "DEF"]
-    # stabilní řazení
-    atts.sort(key=lambda x: (x.get("full_name") or "").lower())
-    defs.sort(key=lambda x: (x.get("full_name") or "").lower())
-    return atts, defs
-
-def render_team_picker(team_name: str, team_players: list[dict], match_id: str, side: str):
-    # side jen pro unikátní klíče (home/away)
-    flag = team_flag(team_name)
-
-    st.markdown(f'<div class="picker-title">{flag} {team_name}</div>', unsafe_allow_html=True)
-    st.markdown('<div class="picker-subtitle">Klikni na hráče (vybereš jen 1 pro celý zápas).</div>', unsafe_allow_html=True)
-
-    atts, defs = split_by_role(team_players)
-
-    # Útočníci
-    st.markdown('<div class="picker-section">Útočníci</div>', unsafe_allow_html=True)
-    if not atts:
-        st.caption("— žádní útočníci v databázi —")
-    else:
-        for p in atts:
-            pid = p.get("id")
-            if not pid:
-                continue
-            key = f"pick_{match_id}_{side}_{pid}"
-            if st.button(player_row_label(p), key=key):
-                st.session_state[f"scorer_{match_id}"] = pid
-
-    # mezera
-    st.markdown('<div class="picker-gap"></div>', unsafe_allow_html=True)
-
-    # Obránci
-    st.markdown('<div class="picker-section">Obránci</div>', unsafe_allow_html=True)
-    if not defs:
-        st.caption("— žádní obránci v databázi —")
-    else:
-        for p in defs:
-            pid = p.get("id")
-            if not pid:
-                continue
-            key = f"pick_{match_id}_{side}_{pid}"
-            if st.button(player_row_label(p), key=key):
-                st.session_state[f"scorer_{match_id}"] = pid
-
-# =====================
-# 4) UI zápasů
-# =====================
-now = datetime.now(timezone.utc)
-
+# 3) Rozdělení zápasů podle dne
+by_day = {}
 for m in matches:
+    dt = parse_dt(m["starts_at"])
+    if not dt:
+        continue
+    m["_dt"] = dt
+    d = dt.date()
+    by_day.setdefault(d, []).append(m)
+
+days_sorted = sorted(by_day.keys())
+future_days = [d for d in days_sorted if d >= today]
+past_days = [d for d in days_sorted if d < today]
+
+
+def day_label(d: date):
+    return d.strftime("%d.%m.%Y")
+
+
+# Cache hráčů per team (ať to netahá DB furt dokola)
+@st.cache_data(ttl=60)
+def load_players_for_team(team_name: str):
+    """
+    Očekávané sloupce v players:
+      team_name, full_name, role (ATT/DEF)
+    Bonus:
+      id, club_name, country3
+    """
+    try:
+        res = (
+            supabase.table("players")
+            .select("id, team_name, full_name, role, club_name, country3")
+            .eq("team_name", team_name)
+            .order("role")
+            .order("full_name")
+            .execute()
+        )
+        return res.data or []
+    except Exception:
+        # fallback když některé sloupce neexistují
+        try:
+            res = (
+                supabase.table("players")
+                .select("team_name, full_name, role")
+                .eq("team_name", team_name)
+                .order("role")
+                .order("full_name")
+                .execute()
+            )
+            return res.data or []
+        except Exception:
+            return []
+
+
+def upsert_prediction(match_id: str, home_score: int, away_score: int, scorer_payload: dict | None = None):
+    payload = {
+        "user_id": user_id,
+        "match_id": match_id,
+        "home_score": int(home_score),
+        "away_score": int(away_score),
+    }
+    if scorer_payload:
+        payload.update(scorer_payload)
+
+    supabase.table("predictions").upsert(
+        payload,
+        on_conflict="user_id,match_id",
+    ).execute()
+
+
+def render_players_block(team_name: str, match_id: str, side: str):
+    """
+    side: "home" / "away" jen pro unikátní keye.
+    Vykreslí Útočníky a Obránce, hráči po 3 v řádku,
+    každý hráč je button – klik = okamžitě uloží střelce.
+    """
+    players = load_players_for_team(team_name)
+    atts = [p for p in players if safe_get(p, "role") == "ATT"]
+    defs = [p for p in players if safe_get(p, "role") == "DEF"]
+
+    st.markdown(f"### {team_flag(team_name)} {team_name}")
+
+    def render_group(title: str, group_players: list[dict], role_label: str):
+        st.markdown(f"**{title}**")
+        if not group_players:
+            st.caption("— žádní hráči v DB —")
+            return
+
+        for row in chunks(group_players, 3):
+            cols = st.columns(3)
+            for col, p in zip(cols, row):
+                full_name = safe_get(p, "full_name", "Neznámý hráč")
+                club = safe_get(p, "club_name", "")
+                c3 = safe_get(p, "country3", "")
+                club_flag = club_country_flag(c3) if c3 else "🏳️"
+
+                # Text na tlačítku: jméno + klub + vlajka země klubu/ligy
+                if club:
+                    label = f"{full_name}\n{club} {club_flag}"
+                else:
+                    label = f"{full_name}\n{club_flag}"
+
+                # stabilní id hráče
+                player_id = safe_get(p, "id") or f"{team_name}:{full_name}:{role_label}"
+
+                if col.button(
+                    label,
+                    key=f"pick_{match_id}_{side}_{player_id}",
+                    type="secondary",
+                ):
+                    # vezmeme aktuální skóre z inputů, pokud existují
+                    h_key = f"h_{match_id}"
+                    a_key = f"a_{match_id}"
+                    current_home = int(st.session_state.get(h_key, pred_by_match.get(match_id, {}).get("home_score", 0)))
+                    current_away = int(st.session_state.get(a_key, pred_by_match.get(match_id, {}).get("away_score", 0)))
+
+                    scorer_payload = {
+                        "scorer_player_id": str(player_id),
+                        "scorer_name": full_name,
+                        "scorer_flag": team_flag(team_name),   # vlajka země za kterou hraje (tým v match)
+                        "scorer_team": team_name,
+                    }
+
+                    try:
+                        upsert_prediction(match_id, current_home, current_away, scorer_payload=scorer_payload)
+                        st.success(f"Střelec uložen ✅ {scorer_payload['scorer_flag']} {full_name}")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Uložení střelce selhalo: {e}")
+
+    render_group("Útočníci", atts, "ATT")
+    st.write("")  # mezera
+    render_group("Obránci", defs, "DEF")
+
+
+def match_row(m: dict):
     match_id = m["id"]
-    home = m["home_team"]
-    away = m["away_team"]
-    starts_at = parse_dt(m["starts_at"])
-    starts_txt = nice_time(starts_at)
+    dt = m["_dt"]
+    time_str = dt.strftime("%H:%M")
+    title = f"{m['home_team']} vs {m['away_team']}"
 
-    pred = pred_by_match.get(match_id) or {}
-    default_home = int(pred.get("home_score") or 0)
-    default_away = int(pred.get("away_score") or 0)
-    default_scorer = pred.get("scorer_player_id")
+    p = pred_by_match.get(match_id, {})
+    has_tip = bool(p)
 
-    # inicializace session selection pro match
-    state_key = f"scorer_{match_id}"
-    if state_key not in st.session_state:
-        st.session_state[state_key] = default_scorer
+    # Status
+    if has_tip:
+        status = f"✅ Natipováno ({p.get('home_score', 0)} : {p.get('away_score', 0)})"
+    else:
+        status = "⏳ Chybí tip"
 
-    with st.expander(f"{home} vs {away}", expanded=False):
-        st.caption(f"Začátek: {starts_txt}")
+    left, right = st.columns([3, 2])
 
-        # skóre
-        c1, c2 = st.columns(2)
-        with c1:
-            home_score = st.number_input(f"{home} (góly)", min_value=0, max_value=99, value=default_home, key=f"hs_{match_id}")
-        with c2:
-            away_score = st.number_input(f"{away} (góly)", min_value=0, max_value=99, value=default_away, key=f"as_{match_id}")
+    with left:
+        st.markdown(f"### {title}")
+        st.caption(f"Začátek: {time_str}")
+        st.write(status)
 
-        st.markdown("---")
+        # vybraný střelec – zobraz pod tipem
+        scorer_name = p.get("scorer_name")
+        scorer_flag = p.get("scorer_flag")
+        if scorer_name:
+            st.markdown(f"**Střelec:** {scorer_flag or '🏳️'} {scorer_name}")
 
-        # výběr střelce ve 2 sloupcích
-        st.subheader("⚽ Vybrat střelce (1 hráč)")
+    with right:
+        # Tipovací pole (jen když zápas ještě nezačal)
+        if dt > now:
+            default_home = int(p.get("home_score", 0) or 0)
+            default_away = int(p.get("away_score", 0) or 0)
 
-        home_players = players_by_team.get(home, [])
-        away_players = players_by_team.get(away, [])
+            home_score = st.number_input(
+                f"{m['home_team']} (góly)",
+                min_value=0,
+                max_value=30,
+                value=default_home,
+                key=f"h_{match_id}",
+            )
+            away_score = st.number_input(
+                f"{m['away_team']} (góly)",
+                min_value=0,
+                max_value=30,
+                value=default_away,
+                key=f"a_{match_id}",
+            )
 
-        left, right = st.columns(2, gap="large")
-        with left:
-            render_team_picker(home, home_players, match_id, "home")
-        with right:
-            render_team_picker(away, away_players, match_id, "away")
+            if st.button("Uložit tip", key=f"save_{match_id}"):
+                try:
+                    # zachovej střelce, pokud už existuje
+                    scorer_payload = {}
+                    if p.get("scorer_name"):
+                        scorer_payload = {
+                            "scorer_player_id": p.get("scorer_player_id"),
+                            "scorer_name": p.get("scorer_name"),
+                            "scorer_flag": p.get("scorer_flag"),
+                            "scorer_team": p.get("scorer_team"),
+                        }
 
-        st.markdown("---")
+                    upsert_prediction(match_id, int(home_score), int(away_score), scorer_payload=scorer_payload or None)
 
-        # clear
-        if st.button("— nevybírat střelce —", key=f"clear_{match_id}", type="secondary"):
-            st.session_state[state_key] = None
+                    st.success("Tip uložen ✅")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Uložení selhalo: {e}")
 
-        chosen_player_id = st.session_state.get(state_key)
+            # výběr střelce – auto-save na klik
+            with st.expander("⚽ Vybrat střelce (1 hráč)", expanded=False):
+                st.caption("Klikni na hráče – uloží se okamžitě.")
+                c1, c2 = st.columns(2)
+                with c1:
+                    render_players_block(m["home_team"], match_id, side="home")
+                with c2:
+                    render_players_block(m["away_team"], match_id, side="away")
 
-        # zobraz vybraného střelce pod tipem jako: vlajka nároďáku + jméno
-        if chosen_player_id:
-            chosen_player = next((p for p in all_players if p.get("id") == chosen_player_id), None)
-            if chosen_player:
-                nat_flag = team_flag(chosen_player.get("team_name"))
-                st.info(f"Vybraný střelec: {nat_flag} {chosen_player.get('full_name')}")
         else:
-            st.warning("Chybí tip na střelce.")
+            st.info("Zápas už začal / proběhl – tip nelze měnit.")
 
-        # uložit tip
-        if st.button("💾 Uložit tip", key=f"save_{match_id}", type="primary"):
-            payload = {
-                "user_id": user_id,
-                "match_id": match_id,
-                "home_score": int(home_score),
-                "away_score": int(away_score),
-                "scorer_player_id": chosen_player_id,
-            }
+    st.divider()
 
-            try:
-                supabase.table("predictions").upsert(
-                    payload,
-                    on_conflict="user_id,match_id",
-                ).execute()
-                st.success("Tip uložen ✅")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Uložení selhalo: {e}")
+
+# =====================
+# UI
+# =====================
+st.title("🏒 Zápasy")
+
+st.subheader("📅 Nadcházející zápasy")
+
+if not future_days:
+    st.info("Žádné nadcházející dny.")
+else:
+    for d in future_days:
+        ms = by_day[d]
+        total = len(ms)
+        done = sum(1 for mm in ms if mm["id"] in pred_by_match)
+
+        with st.expander(f"{day_label(d)}  •  Natipováno {done}/{total}", expanded=False):
+            for mm in ms:
+                match_row(mm)
+
+st.subheader("🕘 Odehrané")
+
+if not past_days:
+    st.info("Zatím nic odehraného.")
+else:
+    for d in reversed(past_days):
+        ms = by_day[d]
+        total = len(ms)
+        done = sum(1 for mm in ms if mm["id"] in pred_by_match)
+
+        with st.expander(f"{day_label(d)}  •  Natipováno {done}/{total}", expanded=False):
+            for mm in ms:
+                match_row(mm)
