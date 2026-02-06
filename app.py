@@ -20,15 +20,8 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-        /* skryje horní lištu (kde se někdy zobrazuje název stránky) */
-        header[data-testid="stHeader"] {
-            display: none;
-        }
-
-        /* skryje default multipage navigaci (app/Login/Zapasy/Leaderboard) */
-        [data-testid="stSidebarNav"] {
-            display: none;
-        }
+        header[data-testid="stHeader"] { display: none; }
+        [data-testid="stSidebarNav"] { display: none; }
     </style>
     """,
     unsafe_allow_html=True
@@ -41,7 +34,7 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
 
 if not SUPABASE_URL or not SUPABASE_ANON_KEY:
-    st.error("Chybí SUPABASE_URL nebo SUPABASE_ANON_KEY v .env")
+    st.error("Chybí SUPABASE_URL nebo SUPABASE_ANON_KEY v .env / Secrets")
     st.stop()
 
 supabase = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
@@ -56,21 +49,60 @@ if st.session_state.get("access_token") and st.session_state.get("refresh_token"
 user = st.session_state.get("user")
 
 # =====================
-# ZJIŠTĚNÍ ADMINA (jen pokud je přihlášený)
+# Helper: načtení profilu (včetně is_admin)
 # =====================
-is_admin = False
-if user:
+def load_profile(user_id: str, email: str):
+    """
+    profiles tabulka má sloupce:
+    user_id (uuid), email (text), points (int), created_at (timestamptz), is_admin (bool)
+
+    1) zkusí načíst řádek podle user_id
+    2) když neexistuje, vytvoří ho (is_admin default false)
+    """
     try:
-        prof = (
+        res = (
             supabase.table("profiles")
-            .select("is_admin")
-            .eq("id", user["id"])
+            .select("user_id, email, points, is_admin")
+            .eq("user_id", user_id)
             .single()
             .execute()
         )
-        is_admin = bool((prof.data or {}).get("is_admin"))
+        return res.data
     except Exception:
-        is_admin = False
+        # pokud profil neexistuje, zkusíme ho vytvořit
+        try:
+            supabase.table("profiles").insert(
+                {
+                    "user_id": user_id,
+                    "email": email,
+                    "points": 0,
+                    "is_admin": False,
+                }
+            ).execute()
+
+            res2 = (
+                supabase.table("profiles")
+                .select("user_id, email, points, is_admin")
+                .eq("user_id", user_id)
+                .single()
+                .execute()
+            )
+            return res2.data
+        except Exception:
+            return None
+
+# pokud je user přihlášený, načti jeho profil a ulož admin flag do session_state
+if user and not st.session_state.get("profile_loaded"):
+    prof = load_profile(user["id"], user.get("email", ""))
+    if prof:
+        st.session_state["profile"] = prof
+        st.session_state["is_admin"] = bool(prof.get("is_admin", False))
+    else:
+        st.session_state["profile"] = None
+        st.session_state["is_admin"] = False
+    st.session_state["profile_loaded"] = True
+
+is_admin = bool(st.session_state.get("is_admin", False))
 
 # =====================
 # SIDEBAR – VLASTNÍ MENU
@@ -81,26 +113,26 @@ with st.sidebar:
     if user:
         st.page_link("pages/2_Zapasy.py", label="🏒 Zápasy")
         st.page_link("pages/3_Leaderboard.py", label="🏆 Leaderboard")
+
+        # ✅ ADMIN se zobrazí jen adminovi
+        if is_admin:
+            st.page_link("pages/1_Soupisky_Admin.py", label="🛠 Admin")
+
         st.markdown("---")
 
         if st.button("🚪 Odhlásit se"):
             st.session_state.clear()
             st.rerun()
-
-        # ---- ADMIN sekce úplně dole ----
-        if is_admin:
-            st.markdown("---")
-            st.page_link("pages/1_Soupisky_Admin.py", label="ADMIN sekce")
     else:
         st.markdown("🔐 Přihlaš se nebo se registruj")
-        # ---- ADMIN sekce úplně dole (viditelná jen adminovi => bez loginu ji neschováme, ale admin stejně není známý) ----
-        # Necháváme schované, protože bez přihlášení nevíme, kdo je admin.
 
 # =====================
 # OBSAH STRÁNKY
 # =====================
 if user:
     st.success(f"Přihlášen jako **{user['email']}**")
+    if is_admin:
+        st.info("Jsi přihlášen jako **admin** ✅")
     st.info("Pokračuj přes menu vlevo 👈")
     st.stop()
 
@@ -129,6 +161,8 @@ with tab_login:
                 st.session_state["access_token"] = res.session.access_token
                 st.session_state["refresh_token"] = res.session.refresh_token
 
+                # ✅ po loginu načti profil (včetně is_admin)
+                st.session_state.pop("profile_loaded", None)
                 st.success("Přihlášení úspěšné ✅")
                 st.switch_page("pages/2_Zapasy.py")
 
