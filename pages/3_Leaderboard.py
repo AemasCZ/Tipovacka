@@ -4,48 +4,23 @@ from supabase import create_client
 from dotenv import load_dotenv
 
 # =====================
-# CSS – schová default Streamlit navigaci + header + přidá "robot" vlevo dole (VIDITELNÝ)
+# Nastavení stránky (MUSÍ BÝT PRVNÍ Streamlit příkaz)
+# =====================
+load_dotenv()
+st.set_page_config(page_title="Leaderboard", page_icon="🏆")
+
+# =====================
+# CSS – schová default Streamlit navigaci + header
 # =====================
 st.markdown(
     """
     <style>
         header[data-testid="stHeader"] { display: none; }
         [data-testid="stSidebarNav"] { display: none; }
-
-        /* ADMIN VSTUP – TEĎ VIDITELNÝ */
-        .admin-fab {
-            position: fixed;
-            left: 16px;
-            bottom: 14px;
-            z-index: 9999;
-            opacity: 1;                 /* PLNĚ VIDITELNÉ */
-            font-size: 28px;
-            background: #ff4b4b;        /* červené kolečko */
-            color: white;
-            padding: 10px 12px;
-            border-radius: 50%;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-            cursor: pointer;
-            user-select: none;
-            transition: transform 0.15s ease;
-        }
-        .admin-fab:hover {
-            transform: scale(1.1);
-        }
-        .admin-fab a {
-            text-decoration: none !important;
-            color: white;
-        }
     </style>
     """,
     unsafe_allow_html=True
 )
-
-# =====================
-# Nastavení stránky
-# =====================
-load_dotenv()
-st.set_page_config(page_title="Leaderboard", page_icon="🏆")
 
 # =====================
 # Supabase klient
@@ -66,19 +41,6 @@ if st.session_state.get("access_token") and st.session_state.get("refresh_token"
     )
 
 # =====================
-# Sidebar – vlastní menu
-# =====================
-with st.sidebar:
-    st.markdown("## 🏒 Tipovačka")
-    st.page_link("pages/2_Zapasy.py", label="🏒 Zápasy")
-    st.page_link("pages/3_Leaderboard.py", label="🏆 Leaderboard")
-    st.markdown("---")
-
-    if st.button("🚪 Odhlásit se"):
-        st.session_state.clear()
-        st.switch_page("app.py")
-
-# =====================
 # Guard: musí být přihlášený
 # =====================
 user = st.session_state.get("user")
@@ -96,37 +58,39 @@ if not st.session_state.get("access_token") or not st.session_state.get("refresh
 user_id = user["id"]
 
 # =====================
-# Admin vstup – když klikneš na robota, přidá se query param ?admin=1
+# Sidebar – vlastní menu + Admin tlačítko dole
 # =====================
-st.markdown(
-    '<div class="admin-fab"><a href="?admin=1" title="Admin">🤖</a></div>',
-    unsafe_allow_html=True
-)
+with st.sidebar:
+    st.markdown("## 🏒 Tipovačka")
+    st.page_link("pages/2_Zapasy.py", label="🏒 Zápasy")
+    st.page_link("pages/3_Leaderboard.py", label="🏆 Leaderboard")
+    st.markdown("---")
 
-# Pokud je v URL admin=1, ověř admina a přesměruj
-qp = st.query_params
-if str(qp.get("admin", "")) == "1":
-    try:
-        prof = (
-            supabase.table("profiles")
-            .select("is_admin")
-            .eq("user_id", user_id)
-            .single()
-            .execute()
-        )
-        is_admin = bool((prof.data or {}).get("is_admin", False))
-    except Exception:
-        is_admin = False
+    if st.button("🚪 Odhlásit se"):
+        st.session_state.clear()
+        st.switch_page("app.py")
 
-    if is_admin:
-        # vyčisti query param, ať se to netočí při refreshi
-        st.query_params.clear()
-        st.switch_page("pages/1_Soupisky_Admin.py")
-        st.stop()
-    else:
-        st.query_params.clear()
-        st.warning("Admin přístup nemáš.")
-        st.stop()
+    # oddělovač, aby to šlo víc dolů
+    st.markdown("<div style='height: 24px;'></div>", unsafe_allow_html=True)
+
+    # VIDITELNÝ ADMIN VSTUP (teď pro test)
+    if st.button("🤖 ADMIN sekce", use_container_width=True):
+        try:
+            prof = (
+                supabase.table("profiles")
+                .select("is_admin")
+                .eq("user_id", user_id)
+                .single()
+                .execute()
+            )
+            is_admin = bool((prof.data or {}).get("is_admin", False))
+        except Exception:
+            is_admin = False
+
+        if is_admin:
+            st.switch_page("pages/1_Soupisky_Admin.py")
+        else:
+            st.warning("Admin přístup nemáš.")
 
 # =====================
 # UI
