@@ -1,3 +1,4 @@
+# pages/2_Zapasy.py
 import os
 from datetime import datetime, timezone, date
 
@@ -145,18 +146,10 @@ def chunks(lst, n=3):
     for i in range(0, len(lst), n):
         yield lst[i:i+n]
 
-def clean_player_name(x: str) -> str:
-    """
-    Oprava: některá jména v DB začínají ", " (z parsingu textu).
-    Tady to vyčistíme.
-    """
+def clean_name(x: str) -> str:
     if not x:
         return ""
-    s = str(x).strip()
-    # pryč všechny leading čárky/mezery
-    while s.startswith(",") or s.startswith(" "):
-        s = s[1:].lstrip()
-    return s
+    return x.strip().lstrip(",").strip()
 
 # =====================
 # Vlajky – top 30 (aliasy)
@@ -207,10 +200,10 @@ def team_flag(team_name: str) -> str:
     iso2 = COUNTRY_NAME_TO_ISO2.get(team_name)
     return iso2_flag(iso2) if iso2 else "🏳️"
 
-def club_country_flag(country3: str | None) -> str:
+def flag_from_country3(country3: str | None) -> str:
     if not country3:
         return "🏳️"
-    iso2 = COUNTRY3_TO_ISO2.get(str(country3).upper())
+    iso2 = COUNTRY3_TO_ISO2.get(country3.upper())
     return iso2_flag(iso2) if iso2 else "🏳️"
 
 # =====================
@@ -279,15 +272,16 @@ past_days = [d for d in days_sorted if d < today]
 @st.cache_data(ttl=120)
 def load_players_for_team(team_name: str):
     """
-    Očekávané sloupce v players:
+    Očekávané sloupce:
       team_name, full_name, role (ATT/DEF)
-    Bonus:
-      id, club_name, country3
+    Bonus (nově):
+      club_name, country3, league_name, league_country3
     """
+    # 1) zkus nejbohatší select
     try:
         res = (
             supabase.table("players")
-            .select("id, team_name, full_name, role, club_name, country3")
+            .select("id, team_name, full_name, role, club_name, country3, league_name, league_country3")
             .eq("team_name", team_name)
             .order("role")
             .order("full_name")
@@ -295,10 +289,11 @@ def load_players_for_team(team_name: str):
         )
         return res.data or []
     except Exception:
+        # 2) fallback: původní select
         try:
             res = (
                 supabase.table("players")
-                .select("team_name, full_name, role")
+                .select("id, team_name, full_name, role, club_name, country3")
                 .eq("team_name", team_name)
                 .order("role")
                 .order("full_name")
@@ -306,7 +301,19 @@ def load_players_for_team(team_name: str):
             )
             return res.data or []
         except Exception:
-            return []
+            # 3) fallback minimal
+            try:
+                res = (
+                    supabase.table("players")
+                    .select("team_name, full_name, role")
+                    .eq("team_name", team_name)
+                    .order("role")
+                    .order("full_name")
+                    .execute()
+                )
+                return res.data or []
+            except Exception:
+                return []
 
 # =====================
 # Uložení tipu (upsert) + fallback bez scorer_* sloupců
@@ -337,7 +344,7 @@ def save_scorer(match_id: str, player: dict, team_name: str):
     current_home = int(st.session_state.get(f"h_{match_id}", pred_by_match.get(match_id, {}).get("home_score", 0) or 0))
     current_away = int(st.session_state.get(f"a_{match_id}", pred_by_match.get(match_id, {}).get("away_score", 0) or 0))
 
-    full_name = clean_player_name(safe_get(player, "full_name", "Neznámý hráč"))
+    full_name = clean_name(safe_get(player, "full_name", "Neznámý hráč"))
     player_id = safe_get(player, "id") or f"{team_name}:{full_name}:{safe_get(player,'role','UNK')}"
 
     scorer_payload = {
@@ -350,6 +357,19 @@ def save_scorer(match_id: str, player: dict, team_name: str):
     upsert_prediction(match_id, current_home, current_away, scorer_payload=scorer_payload)
     st.success(f"Střelec uložen ✅ {scorer_payload['scorer_flag']} {full_name}")
     st.rerun()
+
+def player_button_label(p: dict):
+    full_name = clean_name(safe_get(p, "full_name", "Neznámý hráč"))
+
+    club = safe_get(p, "club_name") or "—"
+    league = safe_get(p, "league_name") or ""
+    league_part = f", {league}" if league else ""
+
+    # vlajka: preferuj league_country3, jinak country3
+    c3 = safe_get(p, "league_country3") or safe_get(p, "country3") or ""
+    fl = flag_from_country3(c3)
+
+    return f"{full_name}\n({club}{league_part}, {fl})"
 
 # =====================
 # Render hráčů pro tým – všichni hráči, 3 na řádek, nejdřív Útočníci pak Obránci
@@ -370,22 +390,9 @@ def render_team_players_full(team_name: str, match_id: str, side: str):
         for row in chunks(atts, 3):
             cols = st.columns(3)
             for col, p in zip(cols, row):
-                full_name = clean_player_name(safe_get(p, "full_name", "Neznámý hráč"))
-
-                # klub a země klubu/ligy – pokud v DB nejsou, uvidíš "—" a 🏳️
-                club = safe_get(p, "club_name", None)
-                club = club.strip() if isinstance(club, str) else club
-                club = club if club else "—"
-
-                c3 = safe_get(p, "country3", None)
-                c3 = c3.strip() if isinstance(c3, str) else c3
-                cf = club_country_flag(c3)
-
-                label = f"{full_name}\n({club}, {cf})"
-                pid = safe_get(p, "id") or f"{team_name}:{full_name}:ATT"
-
+                pid = safe_get(p, "id") or f"{team_name}:{clean_name(safe_get(p,'full_name',''))}:ATT"
                 if col.button(
-                    label,
+                    player_button_label(p),
                     key=f"pick_{match_id}_{side}_ATT_{pid}",
                     type="secondary",
                     use_container_width=True,
@@ -402,21 +409,9 @@ def render_team_players_full(team_name: str, match_id: str, side: str):
         for row in chunks(defs, 3):
             cols = st.columns(3)
             for col, p in zip(cols, row):
-                full_name = clean_player_name(safe_get(p, "full_name", "Neznámý hráč"))
-
-                club = safe_get(p, "club_name", None)
-                club = club.strip() if isinstance(club, str) else club
-                club = club if club else "—"
-
-                c3 = safe_get(p, "country3", None)
-                c3 = c3.strip() if isinstance(c3, str) else c3
-                cf = club_country_flag(c3)
-
-                label = f"{full_name}\n({club}, {cf})"
-                pid = safe_get(p, "id") or f"{team_name}:{full_name}:DEF"
-
+                pid = safe_get(p, "id") or f"{team_name}:{clean_name(safe_get(p,'full_name',''))}:DEF"
                 if col.button(
-                    label,
+                    player_button_label(p),
                     key=f"pick_{match_id}_{side}_DEF_{pid}",
                     type="secondary",
                     use_container_width=True,
@@ -424,25 +419,22 @@ def render_team_players_full(team_name: str, match_id: str, side: str):
                     save_scorer(match_id, p, team_name)
 
 # =====================
-# UI – výběr střelců: 2 bloky vedle sebe (home | away), mezera mezi nimi
+# UI – výběr střelců: 2 bloky vedle sebe, s malou mezerou uprostřed
 # =====================
 def render_scorers_section(match_id: str, home_team: str, away_team: str):
     st.markdown("<hr/>", unsafe_allow_html=True)
     st.markdown('<div class="sec-title">⚽ Vyber střelce (klik = uložit)</div>', unsafe_allow_html=True)
 
-    # ✅ lehká mezera mezi týmy – prostřední "spacer" sloupec
-    left, spacer, right = st.columns([1, 0.06, 1], vertical_alignment="top")
-    with spacer:
-        st.write("")
-
+    left, gap, right = st.columns([1, 0.05, 1], vertical_alignment="top")
     with left:
         render_team_players_full(home_team, match_id, side="home")
-
+    with gap:
+        st.write("")
     with right:
         render_team_players_full(away_team, match_id, side="away")
 
 # =====================
-# Řádek zápasu (layout podle tvého zadání)
+# Řádek zápasu
 # =====================
 def match_row(m: dict):
     match_id = m["id"]
@@ -456,14 +448,12 @@ def match_row(m: dict):
 
     st.markdown('<div class="match-card">', unsafe_allow_html=True)
 
-    # --- REKAPITULACE NAHOŘE ---
     title = f"{team_flag(m['home_team'])} {m['home_team']} vs {m['away_team']} {team_flag(m['away_team'])}"
     st.markdown(f'<div class="match-title">{title}</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="muted">⏰ Začátek: {time_str}</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="status">{status}</div>', unsafe_allow_html=True)
 
-    # střelec v rekapitulaci (HNED POD NATIPOVÁNO)
-    scorer_name = clean_player_name(p.get("scorer_name") or "")
+    scorer_name = p.get("scorer_name")
     scorer_flag = p.get("scorer_flag")
     scorer_team = p.get("scorer_team")
     if scorer_name:
@@ -471,17 +461,14 @@ def match_row(m: dict):
     else:
         st.markdown("**Střelec:** —")
 
-    # mezera před sekcí tipování
     st.write("")
     st.write("")
 
-    # pokud zápas už začal, tipování už nejde
     if dt <= now:
         st.info("Zápas už začal / proběhl – tip nelze měnit.")
         st.markdown("</div>", unsafe_allow_html=True)
         return
 
-    # --- TIPOVÁNÍ ---
     st.markdown('<div class="sec-title">📝 Tip na výsledek</div>', unsafe_allow_html=True)
 
     c1, c2, c3 = st.columns([1, 1, 1.3], vertical_alignment="bottom")
@@ -510,12 +497,11 @@ def match_row(m: dict):
     with c3:
         if st.button("💾 Uložit tip", key=f"save_{match_id}", type="primary"):
             try:
-                # zachovej střelce, pokud už existuje
                 scorer_payload = None
                 if p.get("scorer_name"):
                     scorer_payload = {
                         "scorer_player_id": p.get("scorer_player_id"),
-                        "scorer_name": clean_player_name(p.get("scorer_name") or ""),
+                        "scorer_name": p.get("scorer_name"),
                         "scorer_flag": p.get("scorer_flag"),
                         "scorer_team": p.get("scorer_team"),
                     }
@@ -526,7 +512,6 @@ def match_row(m: dict):
             except Exception as e:
                 st.error(f"Uložení selhalo: {e}")
 
-    # --- TIP NA STŘELCE (rekapitulace + výběr) ---
     st.write("")
     st.markdown('<div class="sec-title">⚽ Tip na střelce</div>', unsafe_allow_html=True)
 
@@ -535,7 +520,6 @@ def match_row(m: dict):
     else:
         st.caption("Zatím nevybrán žádný střelec.")
 
-    # Výběr střelců přes celou kartu
     render_scorers_section(match_id, m["home_team"], m["away_team"])
 
     st.markdown("</div>", unsafe_allow_html=True)
