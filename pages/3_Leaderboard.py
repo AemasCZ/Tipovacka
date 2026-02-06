@@ -4,13 +4,31 @@ from supabase import create_client
 from dotenv import load_dotenv
 
 # =====================
-# CSS – schová default Streamlit navigaci + header
+# CSS – schová default Streamlit navigaci + header + přidá "robot" vlevo dole
 # =====================
 st.markdown(
     """
     <style>
         header[data-testid="stHeader"] { display: none; }
         [data-testid="stSidebarNav"] { display: none; }
+
+        /* Skrytý admin vstup – robot vlevo dole */
+        .admin-fab {
+            position: fixed;
+            left: 16px;
+            bottom: 14px;
+            z-index: 9999;
+            opacity: 0.18;           /* skoro neviditelné */
+            font-size: 22px;
+            user-select: none;
+            transition: opacity 0.2s ease;
+        }
+        .admin-fab:hover {
+            opacity: 0.75;           /* při najetí myší se ukáže víc */
+        }
+        .admin-fab a {
+            text-decoration: none !important;
+        }
     </style>
     """,
     unsafe_allow_html=True
@@ -28,7 +46,7 @@ st.set_page_config(page_title="Leaderboard", page_icon="🏆")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
 if not SUPABASE_URL or not SUPABASE_ANON_KEY:
-    st.error("Chybí SUPABASE_URL nebo SUPABASE_ANON_KEY v .env")
+    st.error("Chybí SUPABASE_URL nebo SUPABASE_ANON_KEY v .env / Secrets")
     st.stop()
 
 supabase = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
@@ -67,6 +85,41 @@ if not user:
 if not st.session_state.get("access_token") or not st.session_state.get("refresh_token"):
     st.error("Chybí session tokeny. Odhlas se a přihlas znovu.")
     st.stop()
+
+user_id = user["id"]
+
+# =====================
+# Skrytý admin vstup – když klikneš na robota, přidá se query param ?admin=1
+# =====================
+st.markdown(
+    '<div class="admin-fab"><a href="?admin=1" title="Admin">🤖</a></div>',
+    unsafe_allow_html=True
+)
+
+# Pokud je v URL admin=1, ověř admina a přesměruj
+qp = st.query_params
+if str(qp.get("admin", "")) == "1":
+    try:
+        prof = (
+            supabase.table("profiles")
+            .select("is_admin")
+            .eq("user_id", user_id)
+            .single()
+            .execute()
+        )
+        is_admin = bool((prof.data or {}).get("is_admin", False))
+    except Exception:
+        is_admin = False
+
+    if is_admin:
+        # vyčisti query param, ať se to netočí při refreshi
+        st.query_params.clear()
+        st.switch_page("pages/1_Soupisky_Admin.py")
+        st.stop()
+    else:
+        st.query_params.clear()
+        st.warning("Admin přístup nemáš.")
+        st.stop()
 
 # =====================
 # UI
