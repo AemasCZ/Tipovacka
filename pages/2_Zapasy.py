@@ -145,6 +145,19 @@ def chunks(lst, n=3):
     for i in range(0, len(lst), n):
         yield lst[i:i+n]
 
+def clean_player_name(x: str) -> str:
+    """
+    Oprava: některá jména v DB začínají ", " (z parsingu textu).
+    Tady to vyčistíme.
+    """
+    if not x:
+        return ""
+    s = str(x).strip()
+    # pryč všechny leading čárky/mezery
+    while s.startswith(",") or s.startswith(" "):
+        s = s[1:].lstrip()
+    return s
+
 # =====================
 # Vlajky – top 30 (aliasy)
 # =====================
@@ -197,7 +210,7 @@ def team_flag(team_name: str) -> str:
 def club_country_flag(country3: str | None) -> str:
     if not country3:
         return "🏳️"
-    iso2 = COUNTRY3_TO_ISO2.get(country3.upper())
+    iso2 = COUNTRY3_TO_ISO2.get(str(country3).upper())
     return iso2_flag(iso2) if iso2 else "🏳️"
 
 # =====================
@@ -324,7 +337,7 @@ def save_scorer(match_id: str, player: dict, team_name: str):
     current_home = int(st.session_state.get(f"h_{match_id}", pred_by_match.get(match_id, {}).get("home_score", 0) or 0))
     current_away = int(st.session_state.get(f"a_{match_id}", pred_by_match.get(match_id, {}).get("away_score", 0) or 0))
 
-    full_name = safe_get(player, "full_name", "Neznámý hráč")
+    full_name = clean_player_name(safe_get(player, "full_name", "Neznámý hráč"))
     player_id = safe_get(player, "id") or f"{team_name}:{full_name}:{safe_get(player,'role','UNK')}"
 
     scorer_payload = {
@@ -357,9 +370,15 @@ def render_team_players_full(team_name: str, match_id: str, side: str):
         for row in chunks(atts, 3):
             cols = st.columns(3)
             for col, p in zip(cols, row):
-                full_name = safe_get(p, "full_name", "Neznámý hráč")
-                club = safe_get(p, "club_name", "") or "—"
-                c3 = safe_get(p, "country3", "")
+                full_name = clean_player_name(safe_get(p, "full_name", "Neznámý hráč"))
+
+                # klub a země klubu/ligy – pokud v DB nejsou, uvidíš "—" a 🏳️
+                club = safe_get(p, "club_name", None)
+                club = club.strip() if isinstance(club, str) else club
+                club = club if club else "—"
+
+                c3 = safe_get(p, "country3", None)
+                c3 = c3.strip() if isinstance(c3, str) else c3
                 cf = club_country_flag(c3)
 
                 label = f"{full_name}\n({club}, {cf})"
@@ -383,9 +402,14 @@ def render_team_players_full(team_name: str, match_id: str, side: str):
         for row in chunks(defs, 3):
             cols = st.columns(3)
             for col, p in zip(cols, row):
-                full_name = safe_get(p, "full_name", "Neznámý hráč")
-                club = safe_get(p, "club_name", "") or "—"
-                c3 = safe_get(p, "country3", "")
+                full_name = clean_player_name(safe_get(p, "full_name", "Neznámý hráč"))
+
+                club = safe_get(p, "club_name", None)
+                club = club.strip() if isinstance(club, str) else club
+                club = club if club else "—"
+
+                c3 = safe_get(p, "country3", None)
+                c3 = c3.strip() if isinstance(c3, str) else c3
                 cf = club_country_flag(c3)
 
                 label = f"{full_name}\n({club}, {cf})"
@@ -400,13 +424,16 @@ def render_team_players_full(team_name: str, match_id: str, side: str):
                     save_scorer(match_id, p, team_name)
 
 # =====================
-# UI – výběr střelců: 2 bloky vedle sebe (home | away), každý má Útočníci + Obránci
+# UI – výběr střelců: 2 bloky vedle sebe (home | away), mezera mezi nimi
 # =====================
 def render_scorers_section(match_id: str, home_team: str, away_team: str):
     st.markdown("<hr/>", unsafe_allow_html=True)
     st.markdown('<div class="sec-title">⚽ Vyber střelce (klik = uložit)</div>', unsafe_allow_html=True)
 
-    left, right = st.columns(2, vertical_alignment="top")
+    # ✅ lehká mezera mezi týmy – prostřední "spacer" sloupec
+    left, spacer, right = st.columns([1, 0.06, 1], vertical_alignment="top")
+    with spacer:
+        st.write("")
 
     with left:
         render_team_players_full(home_team, match_id, side="home")
@@ -436,7 +463,7 @@ def match_row(m: dict):
     st.markdown(f'<div class="status">{status}</div>', unsafe_allow_html=True)
 
     # střelec v rekapitulaci (HNED POD NATIPOVÁNO)
-    scorer_name = p.get("scorer_name")
+    scorer_name = clean_player_name(p.get("scorer_name") or "")
     scorer_flag = p.get("scorer_flag")
     scorer_team = p.get("scorer_team")
     if scorer_name:
@@ -488,7 +515,7 @@ def match_row(m: dict):
                 if p.get("scorer_name"):
                     scorer_payload = {
                         "scorer_player_id": p.get("scorer_player_id"),
-                        "scorer_name": p.get("scorer_name"),
+                        "scorer_name": clean_player_name(p.get("scorer_name") or ""),
                         "scorer_flag": p.get("scorer_flag"),
                         "scorer_team": p.get("scorer_team"),
                     }
