@@ -4,7 +4,7 @@ from supabase import create_client
 from dotenv import load_dotenv
 
 # =====================
-# CSS – schová default Streamlit navigaci + header + přidá "robot" vlevo dole
+# CSS – schová default Streamlit navigaci + header + přidá "robot" vlevo dole (VIDITELNÝ)
 # =====================
 st.markdown(
     """
@@ -12,22 +12,29 @@ st.markdown(
         header[data-testid="stHeader"] { display: none; }
         [data-testid="stSidebarNav"] { display: none; }
 
-        /* Skrytý admin vstup – robot vlevo dole */
+        /* ADMIN VSTUP – TEĎ VIDITELNÝ */
         .admin-fab {
             position: fixed;
             left: 16px;
             bottom: 14px;
             z-index: 9999;
-            opacity: 0.18;           /* skoro neviditelné */
-            font-size: 22px;
+            opacity: 1;                 /* PLNĚ VIDITELNÉ */
+            font-size: 28px;
+            background: #ff4b4b;        /* červené kolečko */
+            color: white;
+            padding: 10px 12px;
+            border-radius: 50%;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            cursor: pointer;
             user-select: none;
-            transition: opacity 0.2s ease;
+            transition: transform 0.15s ease;
         }
         .admin-fab:hover {
-            opacity: 0.75;           /* při najetí myší se ukáže víc */
+            transform: scale(1.1);
         }
         .admin-fab a {
             text-decoration: none !important;
+            color: white;
         }
     </style>
     """,
@@ -89,7 +96,7 @@ if not st.session_state.get("access_token") or not st.session_state.get("refresh
 user_id = user["id"]
 
 # =====================
-# Skrytý admin vstup – když klikneš na robota, přidá se query param ?admin=1
+# Admin vstup – když klikneš na robota, přidá se query param ?admin=1
 # =====================
 st.markdown(
     '<div class="admin-fab"><a href="?admin=1" title="Admin">🤖</a></div>',
