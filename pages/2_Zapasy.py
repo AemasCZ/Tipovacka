@@ -1,4 +1,5 @@
 import os
+import re
 from datetime import datetime, timezone, date
 
 import streamlit as st
@@ -150,6 +151,16 @@ def clean_name(x: str) -> str:
         return ""
     return x.strip().lstrip(",").strip()
 
+# --- UUID guard (kvůli scorer_player_id = uuid v DB) ---
+UUID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+)
+
+def is_uuid(x) -> bool:
+    if not x:
+        return False
+    return bool(UUID_RE.match(str(x)))
+
 # =====================
 # Vlajky – aliasy
 # =====================
@@ -198,7 +209,7 @@ def team_flag(team_name: str) -> str:
     iso2 = COUNTRY_NAME_TO_ISO2.get(team_name)
     return iso2_flag(iso2) if iso2 else "🏳️"
 
-def country3_flag(country3: str | None) -> str:
+def club_country_flag(country3: str | None) -> str:
     if not country3:
         return "🏳️"
     iso2 = COUNTRY3_TO_ISO2.get(country3.upper())
@@ -212,23 +223,6 @@ today = now.date()
 
 def day_label(d: date):
     return d.strftime("%d.%m.%Y")
-
-# =====================
-# Zjisti, jestli predictions má scorer sloupce
-# =====================
-@st.cache_data(ttl=300)
-def predictions_has_scorer_columns() -> bool:
-    # zkusíme jeden "bezpečný" select na sloupec; když neexistuje, supabase vrátí chybu
-    try:
-        supabase.table("predictions").select("scorer_name").limit(1).execute()
-        supabase.table("predictions").select("scorer_flag").limit(1).execute()
-        supabase.table("predictions").select("scorer_team").limit(1).execute()
-        supabase.table("predictions").select("scorer_player_id").limit(1).execute()
-        return True
-    except Exception:
-        return False
-
-HAS_SCORER = predictions_has_scorer_columns()
 
 # =====================
 # DB načítání
@@ -245,7 +239,8 @@ if not matches:
     st.stop()
 
 def load_my_predictions():
-    if HAS_SCORER:
+    # zkus načíst i scorer sloupce – když nejsou, spadne to do except a vezmeme jen skóre
+    try:
         res = (
             supabase.table("predictions")
             .select("match_id, home_score, away_score, scorer_player_id, scorer_name, scorer_flag, scorer_team")
@@ -253,7 +248,7 @@ def load_my_predictions():
             .execute()
         )
         return res.data or []
-    else:
+    except Exception:
         res = (
             supabase.table("predictions")
             .select("match_id, home_score, away_score")
@@ -284,26 +279,12 @@ past_days = [d for d in days_sorted if d < today]
 @st.cache_data(ttl=120)
 def load_players_for_team(team_name: str):
     """
-    players typicky:
-      id, team_name, full_name, role, club_name, club_country3, league_name, league_country3
-    fallback:
-      id, team_name, full_name, role, club_name, country3 (starší)
+    Tabulka players:
+      team_name, full_name, role (ATT/DEF)
+    + bonus:
+      id, club_name, country3
+    (když tam máš i ligu, přidej si později do selectu)
     """
-    # 1) nová struktura (klub + liga)
-    try:
-        res = (
-            supabase.table("players")
-            .select("id, team_name, full_name, role, club_name, club_country3, league_name, league_country3")
-            .eq("team_name", team_name)
-            .order("role")
-            .order("full_name")
-            .execute()
-        )
-        return res.data or []
-    except Exception:
-        pass
-
-    # 2) starší struktura (club_name + country3)
     try:
         res = (
             supabase.table("players")
@@ -315,24 +296,21 @@ def load_players_for_team(team_name: str):
         )
         return res.data or []
     except Exception:
-        pass
-
-    # 3) úplné minimum
-    try:
-        res = (
-            supabase.table("players")
-            .select("team_name, full_name, role")
-            .eq("team_name", team_name)
-            .order("role")
-            .order("full_name")
-            .execute()
-        )
-        return res.data or []
-    except Exception:
-        return []
+        try:
+            res = (
+                supabase.table("players")
+                .select("team_name, full_name, role")
+                .eq("team_name", team_name)
+                .order("role")
+                .order("full_name")
+                .execute()
+            )
+            return res.data or []
+        except Exception:
+            return []
 
 # =====================
-# Uložení tipu (base upsert) + volitelně střelec
+# Uložení tipu (2-krokově: base upsert + optional scorer update)
 # =====================
 def upsert_base_prediction(match_id: str, home_score: int, away_score: int):
     base_payload = {
@@ -341,14 +319,11 @@ def upsert_base_prediction(match_id: str, home_score: int, away_score: int):
         "home_score": int(home_score),
         "away_score": int(away_score),
     }
+    # tohle MUSÍ fungovat (jinak je problém RLS / constraint)
     supabase.table("predictions").upsert(base_payload, on_conflict="user_id,match_id").execute()
 
 def update_scorer(match_id: str, scorer_payload: dict):
-    if not HAS_SCORER:
-        # DB nemá scorer_* sloupce
-        raise RuntimeError(
-            "Tabulka predictions nemá scorer_* sloupce. Přidej je v Supabase (SQL migrace) a reloadni app."
-        )
+    # update scorer_* po vytvoření řádku
     supabase.table("predictions").update(scorer_payload).eq("user_id", user_id).eq("match_id", match_id).execute()
 
 # =====================
@@ -359,48 +334,36 @@ def save_scorer(match_id: str, player: dict, team_name: str):
     current_away = int(st.session_state.get(f"a_{match_id}", pred_by_match.get(match_id, {}).get("away_score", 0) or 0))
 
     full_name = clean_name(safe_get(player, "full_name", "Neznámý hráč"))
-    player_id = safe_get(player, "id") or f"{team_name}:{full_name}:{safe_get(player,'role','UNK')}"
+
+    raw_player_id = safe_get(player, "id")
+    scorer_player_id = str(raw_player_id) if is_uuid(raw_player_id) else None
 
     scorer_payload = {
-        "scorer_player_id": str(player_id),
+        "scorer_player_id": scorer_player_id,  # uuid nebo None (NE string "Team:Name:Role")
         "scorer_name": full_name,
         "scorer_flag": team_flag(team_name),
         "scorer_team": team_name,
     }
 
     try:
+        # 1) vždycky vytvoř/aktualizuj základní tip
         upsert_base_prediction(match_id, current_home, current_away)
+
+        # 2) potom update scorer_*
         update_scorer(match_id, scorer_payload)
+
         st.success(f"Střelec uložen ✅ {scorer_payload['scorer_flag']} {full_name}")
         st.rerun()
     except Exception as e:
-        st.error("Uložení střelce selhalo:")
+        st.error("Uložení střelce selhalo – tohle je důvod (nejspíš chybí scorer_* sloupce nebo RLS):")
         st.code(str(e))
-        if not HAS_SCORER:
-            st.warning(
-                "➡️ V Supabase přidej do `predictions` sloupce: scorer_player_id, scorer_name, scorer_team, scorer_flag. "
-                "Pak refresh."
-            )
 
-def player_label(p: dict) -> str:
+def player_label(p: dict):
     full_name = clean_name(safe_get(p, "full_name", "Neznámý hráč"))
-
     club = safe_get(p, "club_name", "") or "—"
-
-    # liga (pokud existuje)
-    league = safe_get(p, "league_name", None)
-    if league:
-        # nové sloupce
-        cc3 = safe_get(p, "club_country3", "") or ""
-        lc3 = safe_get(p, "league_country3", "") or ""
-        club_flag = country3_flag(cc3)
-        league_flag = country3_flag(lc3)
-        return f"{full_name}\n({club} {club_flag} • {league} {league_flag})"
-
-    # fallback starý country3
-    c3 = safe_get(p, "country3", "") or ""
-    club_flag = country3_flag(c3)
-    return f"{full_name}\n({club}, {club_flag})"
+    c3 = safe_get(p, "country3", "")
+    cf = club_country_flag(c3)
+    return f"{full_name}\n({club}, {cf})"
 
 # =====================
 # Render hráčů pro tým – 3 na řádek, nejdřív Útočníci pak Obránci
@@ -471,7 +434,7 @@ def match_row(m: dict):
     time_str = dt.strftime("%H:%M")
 
     p = pred_by_match.get(match_id, {})
-    has_tip = match_id in pred_by_match
+    has_tip = match_id in pred_by_match  # jistější než bool(p)
 
     status = f"✅ Natipováno ({p.get('home_score', 0)} : {p.get('away_score', 0)})" if has_tip else "⏳ Chybí tip"
 
@@ -482,10 +445,9 @@ def match_row(m: dict):
     st.markdown(f'<div class="muted">⏰ Začátek: {time_str}</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="status">{status}</div>', unsafe_allow_html=True)
 
-    scorer_name = p.get("scorer_name") if HAS_SCORER else None
-    scorer_flag = p.get("scorer_flag") if HAS_SCORER else None
-    scorer_team = p.get("scorer_team") if HAS_SCORER else None
-
+    scorer_name = p.get("scorer_name")
+    scorer_flag = p.get("scorer_flag")
+    scorer_team = p.get("scorer_team")
     if scorer_name:
         st.markdown(f"**Střelec:** {scorer_flag or '🏳️'} {scorer_name} ({scorer_team})")
     else:
@@ -530,13 +492,16 @@ def match_row(m: dict):
                 upsert_base_prediction(match_id, int(home_score), int(away_score))
 
                 # zachovej střelce, pokud existuje (jen když DB má sloupce)
-                if HAS_SCORER and p.get("scorer_name"):
-                    update_scorer(match_id, {
-                        "scorer_player_id": p.get("scorer_player_id"),
-                        "scorer_name": p.get("scorer_name"),
-                        "scorer_flag": p.get("scorer_flag"),
-                        "scorer_team": p.get("scorer_team"),
-                    })
+                if p.get("scorer_name"):
+                    try:
+                        update_scorer(match_id, {
+                            "scorer_player_id": p.get("scorer_player_id"),
+                            "scorer_name": p.get("scorer_name"),
+                            "scorer_flag": p.get("scorer_flag"),
+                            "scorer_team": p.get("scorer_team"),
+                        })
+                    except Exception:
+                        pass
 
                 st.success("Tip uložen ✅")
                 st.rerun()
@@ -547,16 +512,10 @@ def match_row(m: dict):
     st.write("")
     st.markdown('<div class="sec-title">⚽ Tip na střelce</div>', unsafe_allow_html=True)
 
-    if not HAS_SCORER:
-        st.warning(
-            "Tip na střelce zatím nepůjde ukládat, protože v tabulce `predictions` chybí scorer_* sloupce. "
-            "Pusť SQL migraci a refresh."
-        )
+    if scorer_name:
+        st.markdown(f"🏳️ **Zvolený:** {scorer_flag or '🏳️'} {scorer_name} ({scorer_team})")
     else:
-        if scorer_name:
-            st.markdown(f"🏳️ **Zvolený:** {scorer_flag or '🏳️'} {scorer_name} ({scorer_team})")
-        else:
-            st.caption("Zatím nevybrán žádný střelec.")
+        st.caption("Zatím nevybrán žádný střelec.")
 
     render_scorers_section(match_id, m["home_team"], m["away_team"])
 
