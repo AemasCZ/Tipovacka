@@ -1,5 +1,28 @@
+# === Secrets ===
 .env
+
+# === Python ===
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.Python
+
+# === Virtual environments ===
 .venv/
 venv/
+ENV/
+env/
+
+# === Streamlit ===
+.streamlit/secrets.toml
+
+# === macOS ===
+.DS_Store
+
+# === IDE / Editors ===
+.vscode/
+.idea/
+
+# === Logs ===
+*.log
