@@ -24,6 +24,23 @@ def _resolve_is_admin(supabase=None, user_id=None) -> bool:
 
 
 def render_top_menu(user=None, *, supabase=None, user_id=None, show_admin: bool = True):
+    st.markdown(
+        """
+        <style>
+            .top-menu-sticky {
+                position: sticky;
+                top: 0;
+                z-index: 1000;
+                background: var(--background-color);
+                padding-top: 0.25rem;
+                padding-bottom: 0.25rem;
+            }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("<div class='top-menu-sticky'>", unsafe_allow_html=True)
     with st.expander("▾ Menu", expanded=False):
         if user:
             st.page_link("pages/2_Zapasy.py", label="🏒 Zápasy")
@@ -38,3 +55,4 @@ def render_top_menu(user=None, *, supabase=None, user_id=None, show_admin: bool 
                 st.switch_page("app.py")
         else:
             st.markdown("🔐 Přihlas se pro menu")
+    st.markdown("</div>", unsafe_allow_html=True)
