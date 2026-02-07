@@ -17,14 +17,11 @@ st.set_page_config(
 # =====================
 # CSS – SCHOVÁNÍ DEFAULT NAV + HEADERU
 # =====================
-st.markdown(
-    """
-    <style>
-        header[data-testid="stHeader"] { display: none; }
-        [data-testid="stSidebarNav"] { display: none; }
-    </style>
-    """,
-    unsafe_allow_html=True
+st.set_page_config(
+    page_title="Tipovačka",
+    page_icon="🏒",
+    layout="centered",
+    initial_sidebar_state="collapsed",
 )
 
 # =====================
