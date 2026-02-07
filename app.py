@@ -2,6 +2,7 @@ import os
 import streamlit as st
 from supabase import create_client
 from dotenv import load_dotenv
+from ui_menu import render_top_menu
 
 # =====================
 # ZÁKLADNÍ NASTAVENÍ
@@ -102,26 +103,10 @@ if user and not st.session_state.get("profile_loaded"):
 is_admin = bool(st.session_state.get("is_admin", False))
 
 # =====================
-# SIDEBAR – VLASTNÍ MENU
+# TOP MENU (ROZBALOVACÍ)
 # =====================
-with st.sidebar:
-    st.markdown("## 🏒 Tipovačka")
-
-    if user:
-        st.page_link("pages/2_Zapasy.py", label="🏒 Zápasy")
-        st.page_link("pages/3_Leaderboard.py", label="🏆 Leaderboard")
-
-        # ✅ ADMIN se zobrazí jen adminovi
-        if is_admin:
-            st.page_link("pages/1_Soupisky_Admin.py", label="🛠 Admin")
-
-        st.markdown("---")
-
-        if st.button("🚪 Odhlásit se"):
-            st.session_state.clear()
-            st.rerun()
-    else:
-        st.markdown("🔐 Přihlaš se nebo se registruj")
+user_id = user["id"] if user else None
+render_top_menu(user, supabase=supabase, user_id=user_id)
 
 # =====================
 # OBSAH STRÁNKY

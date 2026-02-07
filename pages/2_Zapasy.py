@@ -5,6 +5,7 @@ from datetime import datetime, timezone, date
 import streamlit as st
 from supabase import create_client
 from dotenv import load_dotenv
+from ui_menu import render_top_menu
 
 # =====================
 # CSS – schová default Streamlit navigaci + header + drobný vzhled
@@ -95,22 +96,12 @@ if st.session_state.get("access_token") and st.session_state.get("refresh_token"
     )
 
 # =====================
-# Sidebar – vlastní menu
-# =====================
-with st.sidebar:
-    st.markdown("## 🏒 Tipovačka")
-    st.page_link("pages/2_Zapasy.py", label="🏒 Zápasy")
-    st.page_link("pages/3_Leaderboard.py", label="🏆 Leaderboard")
-    st.markdown("---")
-
-    if st.button("🚪 Odhlásit se"):
-        st.session_state.clear()
-        st.switch_page("app.py")
-
-# =====================
 # Guard: musí být přihlášený
 # =====================
 user = st.session_state.get("user")
+user_id = user["id"] if user else None
+render_top_menu(user, supabase=supabase, user_id=user_id)
+
 if not user:
     st.warning("Nejsi přihlášený. Jdi do Login.")
     st.stop()

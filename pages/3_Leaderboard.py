@@ -2,6 +2,7 @@ import os
 import streamlit as st
 from supabase import create_client
 from dotenv import load_dotenv
+from ui_menu import render_top_menu
 
 # =====================
 # Nastavení stránky (MUSÍ BÝT PRVNÍ Streamlit příkaz)
@@ -44,6 +45,9 @@ if st.session_state.get("access_token") and st.session_state.get("refresh_token"
 # Guard: musí být přihlášený
 # =====================
 user = st.session_state.get("user")
+user_id = user["id"] if user else None
+render_top_menu(user, supabase=supabase, user_id=user_id)
+
 if not user:
     st.warning("Nejsi přihlášený.")
     if st.button("Jít na přihlášení"):
@@ -56,41 +60,6 @@ if not st.session_state.get("access_token") or not st.session_state.get("refresh
     st.stop()
 
 user_id = user["id"]
-
-# =====================
-# Sidebar – vlastní menu + Admin tlačítko dole
-# =====================
-with st.sidebar:
-    st.markdown("## 🏒 Tipovačka")
-    st.page_link("pages/2_Zapasy.py", label="🏒 Zápasy")
-    st.page_link("pages/3_Leaderboard.py", label="🏆 Leaderboard")
-    st.markdown("---")
-
-    if st.button("🚪 Odhlásit se"):
-        st.session_state.clear()
-        st.switch_page("app.py")
-
-    # oddělovač, aby to šlo víc dolů
-    st.markdown("<div style='height: 24px;'></div>", unsafe_allow_html=True)
-
-    # VIDITELNÝ ADMIN VSTUP (teď pro test)
-    if st.button("🤖 ADMIN sekce", use_container_width=True):
-        try:
-            prof = (
-                supabase.table("profiles")
-                .select("is_admin")
-                .eq("user_id", user_id)
-                .single()
-                .execute()
-            )
-            is_admin = bool((prof.data or {}).get("is_admin", False))
-        except Exception:
-            is_admin = False
-
-        if is_admin:
-            st.switch_page("pages/1_Soupisky_Admin.py")
-        else:
-            st.warning("Admin přístup nemáš.")
 
 # =====================
 # UI

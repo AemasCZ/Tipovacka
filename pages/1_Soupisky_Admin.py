@@ -4,6 +4,7 @@ import re
 import streamlit as st
 from supabase import create_client
 from dotenv import load_dotenv
+from ui_menu import render_top_menu
 
 # =====================
 # CSS – schová default Streamlit navigaci + header
@@ -46,6 +47,9 @@ if st.session_state.get("access_token") and st.session_state.get("refresh_token"
 # Guard: musí být přihlášený
 # =====================
 user = st.session_state.get("user")
+user_id = user["id"] if user else None
+render_top_menu(user, supabase=supabase, user_id=user_id)
+
 if not user:
     st.warning("Nejsi přihlášený.")
     if st.button("Jít na přihlášení"):
