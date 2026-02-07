@@ -27,6 +27,7 @@ def render_top_menu(user=None, *, supabase=None, user_id=None, show_admin: bool 
     st.markdown(
         """
         <style>
+            div[data-testid="collapsedControl"] { display: none; }
             .top-menu-sticky {
                 position: sticky;
                 top: 0;

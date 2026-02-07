@@ -26,6 +26,18 @@ st.set_page_config(
 )
 
 # =====================
+# CSS – SCHOVÁNÍ SIDEBAR TOGGLE (>>)
+# =====================
+st.markdown(
+    """
+    <style>
+        div[data-testid="collapsedControl"] { display: none; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# =====================
 # SUPABASE
 # =====================
 SUPABASE_URL = os.getenv("SUPABASE_URL")
