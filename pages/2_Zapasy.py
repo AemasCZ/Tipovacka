@@ -361,9 +361,10 @@ def save_scorer(match_id: str, player: dict, team_name: str):
 def player_label(p: dict):
     full_name = clean_name(safe_get(p, "full_name", "Neznámý hráč"))
     club = safe_get(p, "club_name", "") or "—"
-    c3 = safe_get(p, "country3", "")
-    cf = club_country_flag(c3)
-    return f"{full_name}\n({club}, {cf})"
+    # league_country3 obsahuje zemi ligy (např. "USA" pro NHL, "CZE" pro Extraligu)
+    league_c3 = safe_get(p, "league_country3", "") or safe_get(p, "country3", "")
+    cf = club_country_flag(league_c3)
+    return f"{full_name}\n({club} {cf})"
 
 # =====================
 # Render hráčů pro tým – 3 na řádek, nejdřív Útočníci pak Obránci
