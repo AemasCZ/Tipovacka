@@ -160,7 +160,7 @@ with tab_register:
             else:
                 try:
                     supabase.auth.sign_up({"email": reg_email.strip(), "password": reg_password})
-                    st.success("✅ Registrace odeslána. Zkontroluj email (potvrzení/aktivace).")
-                    st.info("Pokud potvrzovací email nepřijde hned, počkej chvíli a neklikej opakovaně.")
+                    st.success("✅ Registrace odeslána. Můžeš se přihlásit do tipovačky).")
+                    st.info("Není potřeba potvrzovat nic v email")
                 except Exception as e:
                     st.error(f"Chyba při registraci: {e}")
