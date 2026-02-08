@@ -28,7 +28,7 @@ if st.session_state.get("access_token") and st.session_state.get("refresh_token"
 # HERO + LOGO (vpravo v okně)
 render_hero(
     "Tipovačka",
-    "Milano Cortina 2026 • tipuj výsledky, střelce a umístění. Vše v O2-like stylu.",
+    "Milano Cortina 2026 • tipuj výsledky, střelce a umístění.",
     image_path="assets/milano_cortina_2026.png",  # ✅ sem dej svůj soubor
 )
 
