@@ -139,7 +139,7 @@ with tab_login:
 # REGISTER
 # ================
 with tab_register:
-    with card("🆕 Registrace", "Po registraci se může vyžadovat potvrzení emailu."):
+    with card("🆕 Registrace", "Po registraci se nevyžaduje potvrzení mailem."):
         with st.form("register_form", clear_on_submit=False):
             reg_email = st.text_input("Email", placeholder="např. miloslav.tlapa@o2.cz")
             reg_password = st.text_input("Heslo", type="password")
@@ -161,6 +161,6 @@ with tab_register:
                 try:
                     supabase.auth.sign_up({"email": reg_email.strip(), "password": reg_password})
                     st.success("✅ Registrace odeslána. Můžeš se přihlásit do tipovačky).")
-                    st.info("Není potřeba potvrzovat nic v email")
+                    st.info("Není potřeba potvrzovat nic v mailu")
                 except Exception as e:
                     st.error(f"Chyba při registraci: {e}")
