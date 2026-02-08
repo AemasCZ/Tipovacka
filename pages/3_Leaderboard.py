@@ -1,3 +1,4 @@
+# pages/3_Leaderboard.py
 import os
 import streamlit as st
 from supabase import create_client
@@ -18,6 +19,16 @@ st.markdown(
     <style>
         header[data-testid="stHeader"] { display: none; }
         [data-testid="stSidebarNav"] { display: none; }
+
+        .card {
+            border: 1px solid rgba(255,255,255,0.10);
+            background: rgba(255,255,255,0.02);
+            border-radius: 16px;
+            padding: 16px;
+            margin: 10px 0 16px 0;
+        }
+        .muted { opacity: 0.75; font-size: 14px; }
+        button[kind="secondary"], button[kind="primary"] { width: 100% !important; }
     </style>
     """,
     unsafe_allow_html=True
@@ -66,6 +77,36 @@ user_id = user["id"]
 # =====================
 st.title("🏆 Leaderboard")
 
+# =====================
+# Zjisti, jestli je user admin
+# =====================
+is_admin = False
+try:
+    my_prof = (
+        supabase.table("profiles")
+        .select("is_admin")
+        .eq("user_id", user_id)
+        .single()
+        .execute()
+    )
+    is_admin = bool((my_prof.data or {}).get("is_admin", False))
+except Exception:
+    is_admin = False
+
+# =====================
+# Admin sekce (jen admin)
+# =====================
+if is_admin:
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.subheader("🛠️ Admin")
+    st.markdown('<div class="muted">Vyhodnocení zápasů a přepočet bodů.</div>', unsafe_allow_html=True)
+    if st.button("🧮 Vyhodnocení zápasů", type="primary"):
+        st.switch_page("pages/4_Admin_Vyhodnoceni.py")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# =====================
+# Načtení leaderboardu
+# =====================
 try:
     res = (
         supabase.table("profiles")
@@ -83,6 +124,14 @@ if not rows:
 else:
     table = []
     for i, r in enumerate(rows, start=1):
-        table.append({"#": i, "Uživatel": r["email"], "Body": r["points"]})
+        table.append
+
+        table.append(
+            {
+                "#": i,
+                "Uživatel": r.get("email") or "—",
+                "Body": int(r.get("points") or 0),
+            }
+        )
 
     st.dataframe(table, use_container_width=True, hide_index=True)
