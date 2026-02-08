@@ -1,4 +1,3 @@
-# ui_layout.py
 import base64
 from pathlib import Path
 import streamlit as st
@@ -36,6 +35,7 @@ def apply_o2_style():
 
           .block-container{
             padding-top: 1.1rem !important;
+            padding-bottom: 120px !important; /* ✅ FIX: ať spodní overlay (Manage app) nezakrývá tlačítka */
             max-width: 1200px !important;
           }
 
