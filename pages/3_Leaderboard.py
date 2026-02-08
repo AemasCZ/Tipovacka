@@ -1,4 +1,3 @@
-# pages/3_Leaderboard.py
 import os
 import html as html_lib
 import streamlit as st
@@ -92,18 +91,21 @@ if is_admin:
     st.subheader("🛠️ Admin")
     st.markdown('<div class="muted">Vyhodnocení zápasů a přepočet bodů.</div>', unsafe_allow_html=True)
 
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
         if st.button("🧮 Vyhodnocení zápasů", type="primary"):
             st.switch_page("pages/4_Admin_Vyhodnoceni.py")
     with col2:
+        if st.button("🧮 Vyhodnocení umístění", type="secondary"):
+            st.switch_page("pages/7_Admin_Umisteni.py")
+    with col3:
         if st.button("🔄 Synchronizace bodů", type="secondary"):
             st.switch_page("pages/5_Admin_Sync_Points.py")
 
     st.markdown("</div>", unsafe_allow_html=True)
 
 # =====================
-# Načtení dat
+# Načtení profilů
 # =====================
 try:
     prof_res = (
@@ -116,27 +118,51 @@ except Exception as e:
     st.error(f"Nelze načíst profily (RLS?): {e}")
     st.stop()
 
+# =====================
+# Načtení bodů ze zápasů (predictions)
+# =====================
 try:
     preds_res = (
         supabase.table("predictions")
         .select("user_id, points_awarded")
         .execute()
     )
-    preds = preds_res.data or []
+    match_preds = preds_res.data or []
 except Exception as e:
-    st.error(f"Nelze načíst tipy (RLS?): {e}")
+    st.error(f"Nelze načíst tipy zápasů (predictions) (RLS?): {e}")
     st.stop()
 
 # =====================
-# Spočítáme body pro každého uživatele
+# Načtení bodů z umístění (placement_predictions)
+# =====================
+placement_preds = []
+try:
+    pp_res = (
+        supabase.table("placement_predictions")
+        .select("user_id, points_awarded")
+        .execute()
+    )
+    placement_preds = pp_res.data or []
+except Exception:
+    # když tabulka neexistuje / RLS, neblokujeme leaderboard úplně
+    placement_preds = []
+
+# =====================
+# Spočítáme body pro každého uživatele (zápasy + umístění)
 # =====================
 points_by_user = {}
-for p in preds:
+
+for p in match_preds:
     uid = p.get("user_id")
     if not uid:
         continue
-    awarded = p.get("points_awarded") or 0
-    points_by_user[uid] = points_by_user.get(uid, 0) + int(awarded)
+    points_by_user[uid] = points_by_user.get(uid, 0) + int(p.get("points_awarded") or 0)
+
+for p in placement_preds:
+    uid = p.get("user_id")
+    if not uid:
+        continue
+    points_by_user[uid] = points_by_user.get(uid, 0) + int(p.get("points_awarded") or 0)
 
 rows = []
 for pr in profiles:
@@ -157,7 +183,7 @@ if not rows:
     st.stop()
 
 # =====================
-# HTML leaderboard (spolehlivě přes components.html)
+# HTML leaderboard
 # =====================
 def esc(x: str) -> str:
     return html_lib.escape(x or "")
@@ -180,7 +206,6 @@ for i, r in enumerate(rows, start=1):
         """
     )
 
-# výška komponenty (ať to není useknuté)
 row_h = 44
 header_h = 44
 pad = 24
@@ -230,12 +255,10 @@ table_html = f"""
 
     tbody tr:last-child td {{ border-bottom: none; }}
 
-    /* sloupce */
     .col-rank {{ width: 44px; text-align: right; opacity: 0.9; }}
     .col-user {{ width: auto; }}
     .col-points {{ width: 90px; text-align: right; font-weight: 900; }}
 
-    /* TOP badge */
     .top-badge {{
         display: inline-block;
         font-size: 12px;
@@ -247,7 +270,6 @@ table_html = f"""
         opacity: 0.9;
     }}
 
-    /* zvýrazni přihlášeného */
     tr.you {{
         background: rgba(255,255,255,0.04);
     }}
@@ -273,39 +295,3 @@ table_html = f"""
 """
 
 components.html(table_html, height=height, scrolling=False)
-
-# =====================
-# Debug sekce (volitelně)
-# =====================
-if is_admin and st.checkbox("🐛 Zobrazit debug info", value=False):
-    st.markdown("---")
-    st.subheader("Debug: Kontrola synchronizace")
-
-    try:
-        prof_points = (
-            supabase.table("profiles")
-            .select("user_id, email, points")
-            .execute()
-        )
-
-        debug_rows = []
-        for p in prof_points.data or []:
-            uid = p.get("user_id")
-            email = p.get("email") or uid
-            profile_pts = int(p.get("points") or 0)
-            calc_pts = int(points_by_user.get(uid, 0))
-            diff = profile_pts - calc_pts
-
-            debug_rows.append({
-                "Email": email,
-                "profiles.points": profile_pts,
-                "Σ predictions.points_awarded": calc_pts,
-                "Rozdíl": diff
-            })
-
-        st.dataframe(debug_rows, use_container_width=True, hide_index=True)
-
-        if any(r["Rozdíl"] != 0 for r in debug_rows):
-            st.warning("⚠️ Nalezeny nesrovnalosti! Možná je potřeba synchronizovat body.")
-    except Exception as e:
-        st.error(f"Chyba při načítání debug info: {e}")
