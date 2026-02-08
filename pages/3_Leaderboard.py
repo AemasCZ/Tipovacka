@@ -1,7 +1,8 @@
 # pages/3_Leaderboard.py
 import os
-import html
+import html as html_lib
 import streamlit as st
+import streamlit.components.v1 as components
 from supabase import create_client
 from dotenv import load_dotenv
 from ui_menu import render_top_menu
@@ -10,7 +11,7 @@ load_dotenv()
 st.set_page_config(page_title="Leaderboard", page_icon="🏆", layout="wide")
 
 # =====================
-# CSS
+# CSS (globální)
 # =====================
 st.markdown(
     """
@@ -28,49 +29,6 @@ st.markdown(
         }
         .muted { opacity: 0.75; font-size: 14px; }
         button[kind="secondary"], button[kind="primary"] { width: 100% !important; }
-
-        /* Leaderboard table */
-        .lb-wrap { margin-top: 10px; }
-        table.lb {
-            width: 100%;
-            border-collapse: collapse;
-            border: 1px solid rgba(255,255,255,0.10);
-            background: rgba(255,255,255,0.02);
-            border-radius: 14px;
-            overflow: hidden;
-        }
-        table.lb thead th {
-            text-align: left;
-            font-weight: 700;
-            font-size: 13px;
-            opacity: 0.85;
-            padding: 10px 12px;
-            border-bottom: 1px solid rgba(255,255,255,0.10);
-        }
-        table.lb tbody td {
-            padding: 10px 12px;
-            border-bottom: 1px solid rgba(255,255,255,0.06);
-            font-size: 14px;
-        }
-        table.lb tbody tr:last-child td { border-bottom: none; }
-
-        /* Úzké sloupce */
-        .col-rank { width: 44px; white-space: nowrap; text-align: right; opacity: 0.9; }
-        .col-user { width: auto; }
-        .col-points { width: 90px; white-space: nowrap; text-align: right; font-weight: 800; }
-
-        /* Jemné zvýraznění TOP */
-        .top1 { font-weight: 900; }
-        .top-badge {
-            display: inline-block;
-            font-size: 12px;
-            padding: 2px 8px;
-            border-radius: 999px;
-            border: 1px solid rgba(255,255,255,0.14);
-            background: rgba(255,255,255,0.04);
-            margin-left: 8px;
-            opacity: 0.9;
-        }
     </style>
     """,
     unsafe_allow_html=True
@@ -177,22 +135,21 @@ for p in preds:
     uid = p.get("user_id")
     if not uid:
         continue
-    awarded = p.get("points_awarded")
-    if awarded is None:
-        awarded = 0
+    awarded = p.get("points_awarded") or 0
     points_by_user[uid] = points_by_user.get(uid, 0) + int(awarded)
 
 rows = []
-for p in profiles:
-    uid = p.get("user_id")
+for pr in profiles:
+    uid = pr.get("user_id")
     rows.append(
         {
-            "user": p.get("email") or uid,
+            "uid": uid,
+            "user": pr.get("email") or uid,
             "points": int(points_by_user.get(uid, 0)),
         }
     )
 
-# ✅ seřazení podle bodů (desc), při shodě podle jména (asc) pro stabilitu
+# ✅ seřazení podle bodů (desc), při shodě podle jména (asc)
 rows.sort(key=lambda r: (-r["points"], (r["user"] or "").lower()))
 
 if not rows:
@@ -200,31 +157,103 @@ if not rows:
     st.stop()
 
 # =====================
-# Render HTML tabulky (kontrola šířek sloupců)
+# HTML leaderboard (spolehlivě přes components.html)
 # =====================
 def esc(x: str) -> str:
-    return html.escape(x or "")
+    return html_lib.escape(x or "")
 
 html_rows = []
 for i, r in enumerate(rows, start=1):
     user_txt = esc(r["user"])
     pts = int(r["points"])
 
-    # malý "TOP" badge pro prvního
-    badge = ' <span class="top-badge">TOP</span>' if i == 1 else ""
-    top_class = "top1" if i == 1 else ""
+    badge = '<span class="top-badge">TOP</span>' if i == 1 else ""
+    you = "you" if r["uid"] == user_id else ""
 
     html_rows.append(
         f"""
-        <tr class="{top_class}">
+        <tr class="{you}">
             <td class="col-rank">{i}</td>
-            <td class="col-user">{user_txt}{badge}</td>
+            <td class="col-user">{user_txt} {badge}</td>
             <td class="col-points">{pts}</td>
         </tr>
         """
     )
 
+# výška komponenty (ať to není useknuté)
+row_h = 44
+header_h = 44
+pad = 24
+height = min(700, header_h + len(rows) * row_h + pad)
+
 table_html = f"""
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+    body {{
+        margin: 0;
+        padding: 0;
+        color: rgba(255,255,255,0.92);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+        background: transparent;
+    }}
+
+    .lb-wrap {{ margin-top: 8px; }}
+
+    table.lb {{
+        width: 100%;
+        border-collapse: collapse;
+        border: 1px solid rgba(255,255,255,0.10);
+        background: rgba(255,255,255,0.02);
+        border-radius: 14px;
+        overflow: hidden;
+    }}
+
+    thead th {{
+        text-align: left;
+        font-weight: 800;
+        font-size: 13px;
+        opacity: 0.85;
+        padding: 12px 12px;
+        border-bottom: 1px solid rgba(255,255,255,0.10);
+        white-space: nowrap;
+    }}
+
+    tbody td {{
+        padding: 12px 12px;
+        border-bottom: 1px solid rgba(255,255,255,0.06);
+        font-size: 14px;
+        vertical-align: middle;
+    }}
+
+    tbody tr:last-child td {{ border-bottom: none; }}
+
+    /* sloupce */
+    .col-rank {{ width: 44px; text-align: right; opacity: 0.9; }}
+    .col-user {{ width: auto; }}
+    .col-points {{ width: 90px; text-align: right; font-weight: 900; }}
+
+    /* TOP badge */
+    .top-badge {{
+        display: inline-block;
+        font-size: 12px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        border: 1px solid rgba(255,255,255,0.14);
+        background: rgba(255,255,255,0.04);
+        margin-left: 8px;
+        opacity: 0.9;
+    }}
+
+    /* zvýrazni přihlášeného */
+    tr.you {{
+        background: rgba(255,255,255,0.04);
+    }}
+</style>
+</head>
+<body>
 <div class="lb-wrap">
   <table class="lb">
     <thead>
@@ -239,9 +268,11 @@ table_html = f"""
     </tbody>
   </table>
 </div>
+</body>
+</html>
 """
 
-st.markdown(table_html, unsafe_allow_html=True)
+components.html(table_html, height=height, scrolling=False)
 
 # =====================
 # Debug sekce (volitelně)
