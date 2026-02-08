@@ -1,4 +1,3 @@
-# app.py
 import os
 import time
 import streamlit as st
@@ -147,9 +146,14 @@ with tab_login:
                         {"email": email.strip(), "password": password}
                     )
                     set_logged_in_session(auth)
-                    try_ensure_profile_row(st.session_state["user"]["id"], st.session_state["user"]["email"])
+                    try_ensure_profile_row(
+                        st.session_state["user"]["id"],
+                        st.session_state["user"]["email"],
+                    )
                     st.success("✅ Přihlášeno.")
-                    st.rerun()
+                    # ✅ HNED NA ZÁPASY
+                    st.switch_page("pages/2_Zapasy.py")
+
                 except Exception as e:
                     st.error(f"Chyba při přihlášení: {e}")
 
