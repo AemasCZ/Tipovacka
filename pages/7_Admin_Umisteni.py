@@ -34,7 +34,6 @@ st.markdown(
         .title { font-size: 22px; font-weight: 900; margin: 0 0 6px 0; }
         hr { border: none; border-top: 1px solid rgba(255,255,255,0.10); margin: 14px 0; }
         button[kind="secondary"], button[kind="primary"] { width: 100% !important; }
-
         .pill {
             display:inline-flex; align-items:center; gap:8px;
             padding:6px 10px; border-radius:999px;
@@ -50,6 +49,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+NUM_2D_RE = re.compile(r"^\d{1,2}$")  # 0–99 jako 1–2 číslice
+
 # =====================
 # Supabase klient
 # =====================
@@ -61,7 +62,7 @@ if not SUPABASE_URL or not SUPABASE_ANON_KEY:
 
 supabase = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
-# ✅ Session (pro RLS)
+# Session (pro RLS)
 if st.session_state.get("access_token") and st.session_state.get("refresh_token"):
     supabase.auth.set_session(
         st.session_state["access_token"],
@@ -108,8 +109,6 @@ if not profile or not profile.get("is_admin"):
 # =====================
 # Helpery
 # =====================
-NUM_2D_RE = re.compile(r"^\d{1,2}$")  # 0–99
-
 def fmt_date(d) -> str:
     try:
         if isinstance(d, str):
@@ -119,8 +118,6 @@ def fmt_date(d) -> str:
         return dt.strftime("%d.%m.%Y")
     except Exception:
         return str(d)
-
-now = datetime.now(timezone.utc)
 
 # =====================
 # Načtení eventů
@@ -200,7 +197,7 @@ if user_ids:
         emails_by_user = {}
 
 # =====================
-# UI karta eventu
+# UI karta
 # =====================
 is_eval = selected.get("evaluated_at") is not None
 correct_value_existing = selected.get("correct_value")
@@ -230,17 +227,11 @@ st.markdown("<hr/>", unsafe_allow_html=True)
 colA, colB, colC = st.columns([1.2, 1.2, 1.6], vertical_alignment="top")
 
 with colA:
-    # držíme to jako číslo pro UI, ale do DB ukládáme string (kvůli konzistenci s tipy)
-    try:
-        default_cv = int(str(correct_value_existing)) if str(correct_value_existing).isdigit() else 0
-    except Exception:
-        default_cv = 0
-
     correct_value = st.number_input(
         "Správná hodnota (0–99)",
         min_value=0,
         max_value=99,
-        value=default_cv,
+        value=int(correct_value_existing) if str(correct_value_existing).isdigit() else 0,
         step=1,
         disabled=False,
     )
@@ -256,11 +247,10 @@ with colC:
     do_reset = st.button("♻️ Reset vyhodnocení (vrátit zpět)", type="secondary", use_container_width=True)
 
 # =====================
-# Vyhodnocení (FIX: žádný upsert bez predicted_value)
+# Vyhodnocení (FIX: update only, skip prázdné/NULL tipy)
 # =====================
 if do_eval:
     cv = str(int(correct_value)).strip()
-
     if not NUM_2D_RE.match(cv):
         st.error("Správná hodnota musí být číslo 0–99.")
         st.stop()
@@ -268,15 +258,12 @@ if do_eval:
     try:
         now_iso = datetime.now(timezone.utc).isoformat()
 
-        # 1) uložit správnou hodnotu + evaluated_at do eventu
+        # 1) uložit do placement_events
         supabase.table("placement_events").update(
-            {
-                "correct_value": cv,
-                "evaluated_at": now_iso,
-            }
+            {"correct_value": cv, "evaluated_at": now_iso}
         ).eq("id", selected_event_id).execute()
 
-        # 2) načíst jen existující tipy pro event (už máme preds, ale pro jistotu fresh)
+        # 2) načíst pouze existující tipy pro event (fresh)
         preds_res2 = (
             supabase.table("placement_predictions")
             .select("user_id, predicted_value")
@@ -289,24 +276,19 @@ if do_eval:
         updated = 0
         for p in preds2:
             pv = (p.get("predicted_value") or "").strip()
-
-            # pokud někdo nemá tip (nebo je prázdný), jen přeskočit
             if not pv:
                 continue
 
             pts = 10 if pv == cv else 0
 
-            # 4) UPDATE existujícího řádku (NE upsert)
+            # UPDATE existujícího řádku (bez rizika insertu s NULL predicted_value)
             supabase.table("placement_predictions").update(
-                {
-                    "points_awarded": pts,
-                    "evaluated_at": now_iso,
-                }
+                {"points_awarded": pts, "evaluated_at": now_iso}
             ).eq("event_id", selected_event_id).eq("user_id", p["user_id"]).execute()
 
             updated += 1
 
-        st.success(f"Hotovo ✅ Vyhodnoceno. Aktualizováno tipů: {updated}")
+        st.success(f"Hotovo ✅ Vyhodnoceno. Aktualizováno tipů: {updated} (10/0).")
         st.rerun()
 
     except Exception as e:
@@ -318,18 +300,11 @@ if do_eval:
 if do_reset:
     try:
         supabase.table("placement_events").update(
-            {
-                "correct_value": None,
-                "evaluated_at": None,
-            }
+            {"correct_value": None, "evaluated_at": None}
         ).eq("id", selected_event_id).execute()
 
-        # u tipů vynulujeme body + evaluated_at
         supabase.table("placement_predictions").update(
-            {
-                "points_awarded": 0,
-                "evaluated_at": None,
-            }
+            {"points_awarded": 0, "evaluated_at": None}
         ).eq("event_id", selected_event_id).execute()
 
         st.success("Reset hotov ♻️ (event i body u tipů vráceny zpět).")
@@ -359,7 +334,7 @@ else:
         rows.append(
             {
                 "email": email,
-                "tip": pv or "—",
+                "tip": pv,
                 "správně": "✅" if ok else ("—" if correct_str is None else "❌"),
                 "body": pts,
             }

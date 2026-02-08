@@ -1,16 +1,18 @@
 import os
-import html as html_lib
+
 import streamlit as st
-import streamlit.components.v1 as components
 from supabase import create_client
 from dotenv import load_dotenv
 from ui_menu import render_top_menu
 
+# =====================
+# Nastavení stránky
+# =====================
 load_dotenv()
 st.set_page_config(page_title="Leaderboard", page_icon="🏆", layout="wide")
 
 # =====================
-# CSS (globální)
+# CSS
 # =====================
 st.markdown(
     """
@@ -18,7 +20,6 @@ st.markdown(
         header[data-testid="stHeader"] { display: none; }
         [data-testid="stSidebarNav"] { display: none; }
         .block-container { padding-top: 1.2rem; }
-
         .card {
             border: 1px solid rgba(255,255,255,0.10);
             background: rgba(255,255,255,0.02);
@@ -27,14 +28,15 @@ st.markdown(
             margin: 10px 0 16px 0;
         }
         .muted { opacity: 0.75; font-size: 14px; }
+        .title { font-size: 34px; font-weight: 900; margin: 0 0 6px 0; }
         button[kind="secondary"], button[kind="primary"] { width: 100% !important; }
     </style>
     """,
-    unsafe_allow_html=True
+    unsafe_allow_html=True,
 )
 
 # =====================
-# Supabase
+# Supabase klient
 # =====================
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
@@ -44,7 +46,7 @@ if not SUPABASE_URL or not SUPABASE_ANON_KEY:
 
 supabase = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
-# session (RLS)
+# Session (pro RLS)
 if st.session_state.get("access_token") and st.session_state.get("refresh_token"):
     supabase.auth.set_session(
         st.session_state["access_token"],
@@ -59,239 +61,124 @@ user_id = user["id"] if user else None
 render_top_menu(user, supabase=supabase, user_id=user_id)
 
 if not user:
-    st.warning("Nejsi přihlášený.")
-    if st.button("Jít na přihlášení"):
-        st.switch_page("app.py")
-    st.stop()
-
-if not st.session_state.get("access_token") or not st.session_state.get("refresh_token"):
-    st.error("Chybí session tokeny. Odhlas se a přihlas znovu.")
+    st.warning("Nejsi přihlášený. Jdi do Login.")
     st.stop()
 
 st.title("🏆 Leaderboard")
+st.caption("Body se počítají živě z tipů (umístění + případně zápasy).")
 
 # =====================
-# admin?
-# =====================
-is_admin = False
-try:
-    my_prof = (
-        supabase.table("profiles")
-        .select("is_admin")
-        .eq("user_id", user_id)
-        .single()
-        .execute()
-    )
-    is_admin = bool((my_prof.data or {}).get("is_admin", False))
-except Exception:
-    is_admin = False
-
-if is_admin:
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.subheader("🛠️ Admin")
-    st.markdown('<div class="muted">Vyhodnocení zápasů a přepočet bodů.</div>', unsafe_allow_html=True)
-
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        if st.button("🧮 Vyhodnocení zápasů", type="primary"):
-            st.switch_page("pages/4_Admin_Vyhodnoceni.py")
-    with col2:
-        if st.button("🧮 Vyhodnocení umístění", type="secondary"):
-            st.switch_page("pages/7_Admin_Umisteni.py")
-    with col3:
-        if st.button("🔄 Synchronizace bodů", type="secondary"):
-            st.switch_page("pages/5_Admin_Sync_Points.py")
-
-    st.markdown("</div>", unsafe_allow_html=True)
-
-# =====================
-# Načtení profilů
+# Načíst profily
 # =====================
 try:
     prof_res = (
         supabase.table("profiles")
-        .select("user_id, email")
+        .select("user_id, email, is_admin")
         .execute()
     )
     profiles = prof_res.data or []
 except Exception as e:
-    st.error(f"Nelze načíst profily (RLS?): {e}")
+    st.error(f"Nelze načíst profiles: {e}")
     st.stop()
 
-# =====================
-# Načtení bodů ze zápasů (predictions)
-# =====================
-try:
-    preds_res = (
-        supabase.table("predictions")
-        .select("user_id, points_awarded")
-        .execute()
-    )
-    match_preds = preds_res.data or []
-except Exception as e:
-    st.error(f"Nelze načíst tipy zápasů (predictions) (RLS?): {e}")
+if not profiles:
+    st.info("Zatím nejsou žádní uživatelé v profiles.")
     st.stop()
 
+# map: user_id -> email
+email_by_uid = {p["user_id"]: (p.get("email") or "—") for p in profiles}
+
 # =====================
-# Načtení bodů z umístění (placement_predictions)
+# Sečíst body z UMÍSTĚNÍ
 # =====================
-placement_preds = []
+placement_points = {uid: 0 for uid in email_by_uid.keys()}
 try:
     pp_res = (
         supabase.table("placement_predictions")
         .select("user_id, points_awarded")
         .execute()
     )
-    placement_preds = pp_res.data or []
+    pp = pp_res.data or []
+    for row in pp:
+        uid = row.get("user_id")
+        pts = int(row.get("points_awarded") or 0)
+        if uid in placement_points:
+            placement_points[uid] += pts
 except Exception:
-    # když tabulka neexistuje / RLS, neblokujeme leaderboard úplně
-    placement_preds = []
+    # když tabulka neexistuje / RLS / cokoliv – leaderboard pořád poběží
+    pass
 
 # =====================
-# Spočítáme body pro každého uživatele (zápasy + umístění)
+# Sečíst body ze ZÁPASŮ (pokud existuje match_predictions)
 # =====================
-points_by_user = {}
+match_points = {uid: 0 for uid in email_by_uid.keys()}
+try:
+    mp_res = (
+        supabase.table("match_predictions")
+        .select("user_id, points_awarded")
+        .execute()
+    )
+    mp = mp_res.data or []
+    for row in mp:
+        uid = row.get("user_id")
+        pts = int(row.get("points_awarded") or 0)
+        if uid in match_points:
+            match_points[uid] += pts
+except Exception:
+    pass
 
-for p in match_preds:
-    uid = p.get("user_id")
-    if not uid:
-        continue
-    points_by_user[uid] = points_by_user.get(uid, 0) + int(p.get("points_awarded") or 0)
-
-for p in placement_preds:
-    uid = p.get("user_id")
-    if not uid:
-        continue
-    points_by_user[uid] = points_by_user.get(uid, 0) + int(p.get("points_awarded") or 0)
-
+# =====================
+# Složit leaderboard
+# =====================
 rows = []
-for pr in profiles:
-    uid = pr.get("user_id")
+for p in profiles:
+    uid = p["user_id"]
     rows.append(
         {
-            "uid": uid,
-            "user": pr.get("email") or uid,
-            "points": int(points_by_user.get(uid, 0)),
+            "Uživatel": email_by_uid.get(uid, "—"),
+            "Umístění": placement_points.get(uid, 0),
+            "Zápasy": match_points.get(uid, 0),
+            "Body": placement_points.get(uid, 0) + match_points.get(uid, 0),
+            "_is_admin": bool(p.get("is_admin")),
         }
     )
 
-# ✅ seřazení podle bodů (desc), při shodě podle jména (asc)
-rows.sort(key=lambda r: (-r["points"], (r["user"] or "").lower()))
-
-if not rows:
-    st.info("Zatím nejsou žádné tipy s body.")
-    st.stop()
+rows.sort(key=lambda x: (-x["Body"], x["Uživatel"]))
 
 # =====================
-# HTML leaderboard
+# Admin box (tlačítka)
 # =====================
-def esc(x: str) -> str:
-    return html_lib.escape(x or "")
+is_admin = any(p["user_id"] == user_id and p.get("is_admin") for p in profiles)
+if is_admin:
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.subheader("🛠️ Admin")
+    c1, c2, c3 = st.columns([1, 1, 1.2])
+    with c1:
+        if st.button("🧮 Vyhodnocení zápasů", use_container_width=True):
+            st.switch_page("pages/5_Admin_Zapasy.py")  # uprav název souboru podle sebe
+    with c2:
+        if st.button("🧮 Vyhodnocení umístění", use_container_width=True):
+            st.switch_page("pages/7_Admin_Umisteni.py")
+    with c3:
+        st.button("🔄 Synchronizace bodů", use_container_width=True, disabled=True)
+    st.caption("Pozn.: Body se teď počítají živě, synchronizace není potřeba.")
+    st.markdown("</div>", unsafe_allow_html=True)
 
-html_rows = []
+# =====================
+# Tabulka
+# =====================
+# pořadí + TOP štítek
+table_rows = []
 for i, r in enumerate(rows, start=1):
-    user_txt = esc(r["user"])
-    pts = int(r["points"])
-
-    badge = '<span class="top-badge">TOP</span>' if i == 1 else ""
-    you = "you" if r["uid"] == user_id else ""
-
-    html_rows.append(
-        f"""
-        <tr class="{you}">
-            <td class="col-rank">{i}</td>
-            <td class="col-user">{user_txt} {badge}</td>
-            <td class="col-points">{pts}</td>
-        </tr>
-        """
+    user_label = r["Uživatel"]
+    if i == 1:
+        user_label = f"{user_label}   🥇 TOP"
+    table_rows.append(
+        {
+            "#": i,
+            "Uživatel": user_label,
+            "Body": r["Body"],
+        }
     )
 
-row_h = 44
-header_h = 44
-pad = 24
-height = min(700, header_h + len(rows) * row_h + pad)
-
-table_html = f"""
-<!doctype html>
-<html>
-<head>
-<meta charset="utf-8" />
-<style>
-    body {{
-        margin: 0;
-        padding: 0;
-        color: rgba(255,255,255,0.92);
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-        background: transparent;
-    }}
-
-    .lb-wrap {{ margin-top: 8px; }}
-
-    table.lb {{
-        width: 100%;
-        border-collapse: collapse;
-        border: 1px solid rgba(255,255,255,0.10);
-        background: rgba(255,255,255,0.02);
-        border-radius: 14px;
-        overflow: hidden;
-    }}
-
-    thead th {{
-        text-align: left;
-        font-weight: 800;
-        font-size: 13px;
-        opacity: 0.85;
-        padding: 12px 12px;
-        border-bottom: 1px solid rgba(255,255,255,0.10);
-        white-space: nowrap;
-    }}
-
-    tbody td {{
-        padding: 12px 12px;
-        border-bottom: 1px solid rgba(255,255,255,0.06);
-        font-size: 14px;
-        vertical-align: middle;
-    }}
-
-    tbody tr:last-child td {{ border-bottom: none; }}
-
-    .col-rank {{ width: 44px; text-align: right; opacity: 0.9; }}
-    .col-user {{ width: auto; }}
-    .col-points {{ width: 90px; text-align: right; font-weight: 900; }}
-
-    .top-badge {{
-        display: inline-block;
-        font-size: 12px;
-        padding: 2px 8px;
-        border-radius: 999px;
-        border: 1px solid rgba(255,255,255,0.14);
-        background: rgba(255,255,255,0.04);
-        margin-left: 8px;
-        opacity: 0.9;
-    }}
-
-    tr.you {{
-        background: rgba(255,255,255,0.04);
-    }}
-</style>
-</head>
-<body>
-<div class="lb-wrap">
-  <table class="lb">
-    <thead>
-      <tr>
-        <th class="col-rank">#</th>
-        <th class="col-user">Uživatel</th>
-        <th class="col-points">Body</th>
-      </tr>
-    </thead>
-    <tbody>
-      {''.join(html_rows)}
-    </tbody>
-  </table>
-</div>
-</body>
-</html>
-"""
-
-components.html(table_html, height=height, scrolling=False)
+st.dataframe(table_rows, use_container_width=True, hide_index=True)
