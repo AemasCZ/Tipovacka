@@ -1,4 +1,5 @@
 import os
+import re
 from datetime import datetime, timezone, date
 
 import streamlit as st
@@ -74,15 +75,13 @@ if not st.session_state.get("access_token") or not st.session_state.get("refresh
 # =====================
 # Pomocné
 # =====================
+NUM_2D_RE = re.compile(r"^\d{1,2}$")  # 1–2 číslice
+
 def parse_dt(x: str):
     try:
         return datetime.fromisoformat(x.replace("Z", "+00:00"))
     except Exception:
         return None
-
-def safe_int_str(x: str) -> str:
-    # tip ukládáme jako text, ale chceme rozumně odstranit whitespace
-    return (x or "").strip()
 
 now = datetime.now(timezone.utc)
 today = now.date()
@@ -132,7 +131,6 @@ def can_tip(event: dict) -> tuple[bool, str]:
     ed = event.get("event_date")
     la = event.get("lock_at")
 
-    # event_date v supabase bývá string 'YYYY-MM-DD'
     try:
         event_day = date.fromisoformat(ed) if isinstance(ed, str) else ed
     except Exception:
@@ -143,7 +141,7 @@ def can_tip(event: dict) -> tuple[bool, str]:
     if event_day is None:
         return False, "Chybný event_date."
 
-    # tvoje zadání: „pokud už je datum kdy se daná soutěž hraje, tipovat nepůjde“
+    # tvoje zadání: pokud už je datum soutěže, tipovat nepůjde
     if today >= event_day:
         return False, "Tipování uzavřeno (už je den soutěže nebo po něm)."
 
@@ -164,7 +162,7 @@ def day_label(d: str) -> str:
 # UI
 # =====================
 st.title("🏅 Umístění")
-st.caption("Tipuje se umístění / hodnota v disciplíně. Tipovat lze jen do dne před soutěží (a do lock_at, pokud je nastaven).")
+st.caption("Tipuješ číslo (umístění / počet). Pole je omezené na max 2 číslice (0–99). Tipovat lze jen do dne před soutěží (a do lock_at, pokud je nastaven).")
 
 # Rozdělení do sekcí
 future_open = []
@@ -228,26 +226,33 @@ def render_event_card(ev: dict):
     else:
         st.warning(f"🔒 {msg}")
 
-    # tip input
-    default_val = my_val
+    # Pole max 2 číslice (0–99)
+    # max_chars = 2 zaručí „prostor jen na 2 číslice“
+    default_val = my_val if NUM_2D_RE.match(my_val or "") else ""
+
     user_input = st.text_input(
-        "Tvůj tip (např. 1 / 3 / 12 / 5 medailí...)",
+        "Tvůj tip (0–99)",
         value=default_val,
         key=f"tip_{ev_id}",
+        max_chars=2,
         disabled=(not ok),
+        placeholder="např. 1"
     )
 
-    # uložení
+    # Uložit
     if st.button("💾 Uložit tip", type="primary", key=f"save_{ev_id}", disabled=(not ok)):
-        val = safe_int_str(user_input)
+        val = (user_input or "").strip()
+
         if not val:
             st.error("Vyplň tip.")
+        elif not NUM_2D_RE.match(val):
+            st.error("Tip musí být číslo 0–99 (max 2 číslice).")
         else:
             try:
                 payload = {
                     "user_id": user_id,
                     "event_id": ev_id,
-                    "predicted_value": val,
+                    "predicted_value": val,  # ukládáme jako text
                 }
                 supabase.table("placement_predictions").upsert(
                     payload,
@@ -260,7 +265,6 @@ def render_event_card(ev: dict):
             except Exception as e:
                 st.error(f"Uložení tipu selhalo: {e}")
 
-    # ukázat co máš uložené
     if my_val:
         st.markdown(f"**Uložený tip:** {my_val}")
 
@@ -276,7 +280,7 @@ else:
     for ev in future_open:
         render_event_card(ev)
 
-st.subheader("🔒 Uzamčené / probíhající")
+st.subheader("🔒 Uzamčené / probíhhající")
 if not locked:
     st.caption("Nic uzamčeného.")
 else:
