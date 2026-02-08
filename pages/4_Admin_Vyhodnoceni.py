@@ -2,6 +2,7 @@
 import os
 from datetime import datetime, timezone
 
+import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 from supabase import create_client
@@ -201,10 +202,11 @@ if preds:
 # =====================
 # Load scorer decisions (scorer_results) for match
 # =====================
+# ✅ OPRAVA: scorer_results má sloupec scorer_player_id (ne player_id)
 try:
     sr_res = (
         supabase.table("scorer_results")
-        .select("player_id, scorer_name, scorer_team, did_score")
+        .select("scorer_player_id, scorer_name, scorer_team, did_score")
         .eq("match_id", match_id)
         .execute()
     )
@@ -212,7 +214,7 @@ try:
 except Exception:
     scorer_results = []
 
-sr_map = {r["player_id"]: r for r in scorer_results if r.get("player_id")}
+sr_map = {r["scorer_player_id"]: r for r in scorer_results if r.get("scorer_player_id")}
 
 # =====================
 # UI: výsledek zápasu
@@ -264,13 +266,12 @@ if save_match:
 # =====================
 # Tipovaní střelci – rozhodnutí admina
 # =====================
-# vyrob list unikátních tipovaných střelců (podle player_id)
 unique_scorers = {}
 for p in preds:
     pid = p.get("scorer_player_id")
     if pid and pid not in unique_scorers:
         unique_scorers[pid] = {
-            "player_id": pid,
+            "scorer_player_id": pid,
             "scorer_name": p.get("scorer_name") or "—",
             "scorer_team": p.get("scorer_team") or "—",
         }
@@ -285,7 +286,6 @@ with card("⚽ Tipovaní střelci", "U každého střelce rozhodni, jestli dal g
             current = sr_map.get(pid, {})
             did_score_default = bool(current.get("did_score")) if current else False
 
-            # kdo ho tipoval
             who = []
             for p in preds:
                 if p.get("scorer_player_id") == pid:
@@ -306,15 +306,12 @@ with card("⚽ Tipovaní střelci", "U každého střelce rozhodni, jestli dal g
                     try:
                         payload = {
                             "match_id": match_id,
-                            "player_id": pid,
+                            "scorer_player_id": pid,  # ✅ OPRAVA
                             "scorer_name": info["scorer_name"],
                             "scorer_team": info["scorer_team"],
                             "did_score": bool(did_score),
                         }
-
-                        # upsert (pokud existuje, update)
                         supabase.table("scorer_results").upsert(payload).execute()
-
                         st.success("Uloženo ✅")
                         st.rerun()
                     except Exception as e:
@@ -323,9 +320,6 @@ with card("⚽ Tipovaní střelci", "U každého střelce rozhodni, jestli dal g
 # =====================
 # Náhled bodů (pouze UI)
 # =====================
-# NOTE: Tohle je původní logika — nechávám beze změn (jen vizuálně v card)
-import pandas as pd
-
 with card("🧾 Náhled bodů", "Kontrola: jak se body počítají pro jednotlivé tipy."):
     if not preds:
         st.info("Pro tento zápas nejsou žádné tipy.")
@@ -343,16 +337,7 @@ with card("🧾 Náhled bodů", "Kontrola: jak se body počítají pro jednotliv
         st.dataframe(pd.DataFrame(rows), use_container_width=True)
 
 # =====================
-# Přepočet bodů (původní část)
-# =====================
-# (Nechávám původní logiku stránky beze změn – jen vizuál jsme přenesli do O2 stylu.)
-# -------------------------------------------------------------------------------
-# ZBYTEK SOUBORU: původní logika přepočtu/mazání bodů zůstává tak, jak jsi ji měl.
-# Proto ji tu nechávám 1:1, jen posunutou níž bez zásahu.
-# -------------------------------------------------------------------------------
-
-# =====================
-# HELPERS (PŮVODNÍ)
+# HELPERS
 # =====================
 def score_points(pred_h, pred_a, final_h, final_a):
     points = 0
@@ -364,13 +349,11 @@ def score_points(pred_h, pred_a, final_h, final_a):
         "scorer": 0,
     }
 
-    # 6 bodů za přesný výsledek
     if pred_h == final_h and pred_a == final_a:
         points += 6
         detail["exact_score"] = 6
         return points, detail
 
-    # výherce + rozdíl (4 body)
     pred_diff = pred_h - pred_a
     final_diff = final_h - final_a
     pred_winner = 1 if pred_diff > 0 else (-1 if pred_diff < 0 else 0)
@@ -383,7 +366,6 @@ def score_points(pred_h, pred_a, final_h, final_a):
         points += 2
         detail["winner_only"] = 2
 
-    # 1 bod za góly alespoň jednoho týmu
     if pred_h == final_h or pred_a == final_a:
         points += 1
         detail["one_team_goals"] = 1
@@ -399,7 +381,7 @@ def scorer_point_for_prediction(pred: dict, did_score_map: dict) -> int:
 
 
 # =====================
-# ACTIONS (PŮVODNÍ UI)
+# ACTIONS
 # =====================
 with card("⚙️ Akce", "Spusť přepočet bodů nebo smaž hodnocení zápasu."):
     colA, colB = st.columns([1, 1], gap="large")
@@ -409,26 +391,25 @@ with card("⚙️ Akce", "Spusť přepočet bodů nebo smaž hodnocení zápasu.
         do_delete_eval = st.button("🗑️ Smazat hodnocení zápasu", type="secondary", use_container_width=True)
 
 # =====================
-# Přepočet bodů (PŮVODNÍ LOGIKA)
+# Přepočet bodů
 # =====================
 if do_recalc:
     if m.get("final_home_score") is None or m.get("final_away_score") is None:
         st.error("Nejdřív nastav výsledek zápasu.")
     else:
         try:
-            # načti scorer_results z DB znovu
+            # ✅ OPRAVA: scorer_player_id
             sr_res2 = (
                 supabase.table("scorer_results")
-                .select("player_id, did_score")
+                .select("scorer_player_id, did_score")
                 .eq("match_id", match_id)
                 .execute()
             )
-            did_score_map = {r["player_id"]: bool(r.get("did_score")) for r in (sr_res2.data or [])}
+            did_score_map = {r["scorer_player_id"]: bool(r.get("did_score")) for r in (sr_res2.data or [])}
 
             final_h = int(m.get("final_home_score") or 0)
             final_a = int(m.get("final_away_score") or 0)
 
-            # spočti body pro každého uživatele
             updates = []
             for p in preds:
                 ph = int(p.get("home_score") or 0)
@@ -436,6 +417,7 @@ if do_recalc:
 
                 sp, detail = score_points(ph, pa, final_h, final_a)
                 sp += scorer_point_for_prediction(p, did_score_map)
+
                 if p.get("scorer_player_id") and did_score_map.get(p["scorer_player_id"]):
                     detail["scorer"] = 1
 
@@ -448,17 +430,13 @@ if do_recalc:
                     }
                 )
 
-            # uložit do predictions (upsert)
             if updates:
                 supabase.table("predictions").upsert(updates).execute()
 
-            # aktualizuj matches.evaluated_at
             supabase.table("matches").update(
                 {"evaluated_at": datetime.now(timezone.utc).isoformat()}
             ).eq("id", match_id).execute()
 
-            # přepočti profiles.points jako součet predictions.points_awarded
-            # (původní logika v souboru – nechávám)
             uids = list({p["user_id"] for p in preds if p.get("user_id")})
             for uid in uids:
                 r = (
@@ -477,7 +455,7 @@ if do_recalc:
             st.error(f"Chyba při přepočtu: {e}")
 
 # =====================
-# Mazání hodnocení (PŮVODNÍ LOGIKA)
+# Mazání hodnocení
 # =====================
 if do_delete_eval:
     with card("⚠️ Potvrzení", "Tímto smažeš body za zápas a vrátíš ho do stavu 'nevyhodnoceno'."):
@@ -485,7 +463,6 @@ if do_delete_eval:
 
         if st.button("Ano, smaž hodnocení", type="primary", disabled=not confirm):
             try:
-                # 1) načti predictions tohoto zápasu (body)
                 preds_before = (
                     supabase.table("predictions")
                     .select("user_id, points_awarded")
@@ -493,21 +470,18 @@ if do_delete_eval:
                     .execute()
                 ).data or []
 
-                # 2) spočti delta body podle user_id
                 delta_by_user = {}
                 for p in preds_before:
                     uid = p["user_id"]
                     delta_by_user[uid] = delta_by_user.get(uid, 0) - int(p.get("points_awarded") or 0)
 
-                # 3) vynuluj points_awarded v predictions
                 supabase.table("predictions").update(
                     {"points_awarded": 0, "points_detail": None}
                 ).eq("match_id", match_id).execute()
 
-                # 4) smaž scorer_results pro tento zápas
+                # (tady je to OK — jen smažeme řádky pro match)
                 supabase.table("scorer_results").delete().eq("match_id", match_id).execute()
 
-                # 5) odečti body z profiles.points
                 if delta_by_user:
                     uids = list(delta_by_user.keys())
                     profs = (
@@ -525,7 +499,6 @@ if do_delete_eval:
                             {"points": max(new_total, 0)}
                         ).eq("user_id", uid).execute()
 
-                # reset matches
                 supabase.table("matches").update(
                     {"evaluated_at": None}
                 ).eq("id", match_id).execute()
