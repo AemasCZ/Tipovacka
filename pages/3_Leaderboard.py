@@ -6,19 +6,21 @@ from dotenv import load_dotenv
 from ui_menu import render_top_menu
 
 # =====================
-# Nastavení stránky (MUSÍ BÝT PRVNÍ Streamlit příkaz)
+# Nastavení stránky
 # =====================
 load_dotenv()
-st.set_page_config(page_title="Leaderboard", page_icon="🏆")
+st.set_page_config(page_title="Leaderboard", page_icon="🏆", layout="wide")
 
 # =====================
-# CSS – schová default Streamlit navigaci + header
+# CSS
 # =====================
 st.markdown(
     """
     <style>
         header[data-testid="stHeader"] { display: none; }
         [data-testid="stSidebarNav"] { display: none; }
+
+        .block-container { padding-top: 1.2rem; }
 
         .card {
             border: 1px solid rgba(255,255,255,0.10);
@@ -45,7 +47,7 @@ if not SUPABASE_URL or not SUPABASE_ANON_KEY:
 
 supabase = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
-# ✅ Navázání session (nutné pro RLS)
+# ✅ session (RLS)
 if st.session_state.get("access_token") and st.session_state.get("refresh_token"):
     supabase.auth.set_session(
         st.session_state["access_token"],
@@ -53,7 +55,7 @@ if st.session_state.get("access_token") and st.session_state.get("refresh_token"
     )
 
 # =====================
-# Guard: musí být přihlášený
+# Guard: login
 # =====================
 user = st.session_state.get("user")
 user_id = user["id"] if user else None
@@ -65,12 +67,9 @@ if not user:
         st.switch_page("app.py")
     st.stop()
 
-# Pokud máš RLS, bez tokenů to může padat
 if not st.session_state.get("access_token") or not st.session_state.get("refresh_token"):
     st.error("Chybí session tokeny. Odhlas se a přihlas znovu.")
     st.stop()
-
-user_id = user["id"]
 
 # =====================
 # UI
@@ -78,7 +77,7 @@ user_id = user["id"]
 st.title("🏆 Leaderboard")
 
 # =====================
-# Zjisti, jestli je user admin
+# Admin?
 # =====================
 is_admin = False
 try:
@@ -93,9 +92,6 @@ try:
 except Exception:
     is_admin = False
 
-# =====================
-# Admin sekce (jen admin)
-# =====================
 if is_admin:
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.subheader("🛠️ Admin")
@@ -105,7 +101,7 @@ if is_admin:
     st.markdown("</div>", unsafe_allow_html=True)
 
 # =====================
-# Načtení leaderboardu
+# Load leaderboard
 # =====================
 try:
     res = (
@@ -121,17 +117,19 @@ except Exception as e:
 
 if not rows:
     st.info("Zatím žádná data.")
-else:
-    table = []
-    for i, r in enumerate(rows, start=1):
-        table.append
+    st.stop()
 
-        table.append(
-            {
-                "#": i,
-                "Uživatel": r.get("email") or "—",
-                "Body": int(r.get("points") or 0),
-            }
-        )
+# =====================
+# Render table
+# =====================
+table = []
+for i, r in enumerate(rows, start=1):
+    table.append(
+        {
+            "#": i,
+            "Uživatel": r.get("email") or "—",
+            "Body": int(r.get("points") or 0),
+        }
+    )
 
-    st.dataframe(table, use_container_width=True, hide_index=True)
+st.dataframe(table, use_container_width=True, hide_index=True)
