@@ -44,7 +44,7 @@ def apply_o2_style():
             --card: #ffffff;
             --text: #0b1220;
             --muted: rgba(11,18,32,.65);
-            --border: rgba(11,18,32,.12);
+            --border: rgba(11,18,32,.10);
             --shadow: 0 10px 28px rgba(11,18,32,.10);
             --blue: #1b4cff;
             --blue2:#0e2aa8;
@@ -52,7 +52,63 @@ def apply_o2_style():
           }
 
           /* =========================================================
-             2) BUTTON FIX (dlaždice + hráči jako střelci)
+             2) LABELY + INPUTY (aby byly vidět Email/Heslo)
+             ========================================================= */
+          /* widget label */
+          label[data-testid="stWidgetLabel"]{
+            color: var(--text) !important;
+            font-weight: 850 !important;
+            font-size: 14px !important;
+            margin-bottom: 6px !important;
+          }
+
+          /* placeholder a text v inputu */
+          input, textarea{
+            color: var(--text) !important;
+          }
+          input::placeholder, textarea::placeholder{
+            color: rgba(11,18,32,.40) !important;
+          }
+
+          /* Inputs trochu kulatější */
+          [data-baseweb="input"] > div,
+          [data-baseweb="textarea"] > div{
+            border-radius: 14px !important;
+            border: 1px solid rgba(11,18,32,.12) !important;
+            background: #fff !important;
+            box-shadow: 0 6px 16px rgba(11,18,32,.06) !important;
+          }
+
+          /* focus ring */
+          [data-baseweb="input"] > div:focus-within,
+          [data-baseweb="textarea"] > div:focus-within{
+            border-color: rgba(27,76,255,.55) !important;
+            box-shadow: 0 0 0 4px rgba(27,76,255,.14) !important;
+          }
+
+          /* =========================================================
+             3) TABS (Přihlášení / Registrace) – výraznější
+             ========================================================= */
+          [data-testid="stTabs"]{
+            margin-top: 6px !important;
+          }
+          [data-testid="stTabs"] button{
+            color: rgba(11,18,32,.60) !important;
+            font-weight: 900 !important;
+            font-size: 15px !important;
+            padding: 10px 12px !important;
+          }
+          [data-testid="stTabs"] button[aria-selected="true"]{
+            color: var(--blue) !important;
+          }
+          [data-testid="stTabs"] [data-baseweb="tab-highlight"]{
+            background: var(--blue) !important;
+            height: 3px !important;
+            border-radius: 999px !important;
+          }
+
+          /* =========================================================
+             4) BUTTON FIX
              ========================================================= */
           .stButton > button{
             border-radius: 999px !important;
@@ -90,89 +146,11 @@ def apply_o2_style():
           }
 
           /* =========================================================
-             3) INPUTS FIX (Email/Heslo byly tmavé)
-             ========================================================= */
-          /* wrapper */
-          [data-baseweb="input"] > div{
-            background: #fff !important;
-            border: 1px solid var(--border) !important;
-            border-radius: 14px !important;
-            box-shadow: 0 6px 16px rgba(11,18,32,.06) !important;
-          }
-
-          /* input text */
-          [data-baseweb="input"] input{
-            color: var(--text) !important;
-            font-weight: 600 !important;
-          }
-
-          /* placeholder */
-          [data-baseweb="input"] input::placeholder{
-            color: rgba(11,18,32,.45) !important;
-            font-weight: 600 !important;
-          }
-
-          /* focus (modrá linka) */
-          [data-baseweb="input"] > div:focus-within{
-            border-color: rgba(27,76,255,.55) !important;
-            box-shadow: 0 0 0 4px rgba(27,76,255,.14) !important;
-          }
-
-          /* eye icon / input buttons */
-          [data-baseweb="input"] button{
-            color: rgba(11,18,32,.55) !important;
-          }
-
-          /* =========================================================
-             4) TABS FIX (Přihlášení / Registrace nejsou vidět)
-             ========================================================= */
-          div[data-testid="stTabs"]{
-            margin-top: 6px;
-          }
-
-          /* tab list bar */
-          div[data-testid="stTabs"] [data-baseweb="tab-list"]{
-            gap: 10px !important;
-            border-bottom: 1px solid rgba(11,18,32,.10) !important;
-            padding-bottom: 6px !important;
-          }
-
-          /* each tab button */
-          div[data-testid="stTabs"] [data-baseweb="tab"]{
-            background: transparent !important;
-            border-radius: 999px !important;
-            padding: 10px 14px !important;
-            font-weight: 900 !important;
-            font-size: 15px !important;
-            color: rgba(11,18,32,.55) !important;
-            transition: all .12s ease !important;
-          }
-
-          /* selected tab */
-          div[data-testid="stTabs"] [data-baseweb="tab"][aria-selected="true"]{
-            color: var(--blue) !important;
-          }
-
-          /* selected underline */
-          div[data-testid="stTabs"] [data-baseweb="tab-highlight"]{
-            background: var(--blue) !important;
-            height: 3px !important;
-            border-radius: 999px !important;
-          }
-
-          /* hover tab */
-          div[data-testid="stTabs"] [data-baseweb="tab"]:hover{
-            color: rgba(11,18,32,.85) !important;
-            background: rgba(255,255,255,.65) !important;
-            border: 1px solid rgba(11,18,32,.08) !important;
-          }
-
-          /* =========================================================
              5) CARD STYL
              ========================================================= */
           .o2-card{
             background: var(--card);
-            border: 1px solid rgba(11,18,32,.10);
+            border: 1px solid var(--border);
             border-radius: var(--radius);
             box-shadow: var(--shadow);
             padding: 16px 16px 10px 16px;
@@ -180,7 +158,7 @@ def apply_o2_style():
           }
           .o2-card-title{
             font-size: 18px;
-            font-weight: 900;
+            font-weight: 950;
             margin: 0 0 6px 0;
           }
           .o2-muted{
@@ -189,7 +167,7 @@ def apply_o2_style():
           }
 
           /* =========================================================
-             6) HERO STYL
+             6) HERO STYL + LOGO BOX
              ========================================================= */
           .o2-hero{
             border-radius: 28px;
@@ -227,9 +205,11 @@ def apply_o2_style():
             max-width: 42vw;
             height: 220px;
             border-radius: 22px;
-            background-size: cover;
+            background-size: contain;           /* ✅ pro logo */
+            background-repeat: no-repeat;       /* ✅ pro logo */
             background-position: center;
-            box-shadow: 0 18px 50px rgba(0,0,0,.25);
+            background-color: rgba(255,255,255,.10); /* jemný “okno” efekt */
+            box-shadow: 0 18px 50px rgba(0,0,0,.20);
           }
 
           /* =========================================================
