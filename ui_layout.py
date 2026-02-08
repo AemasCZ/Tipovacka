@@ -54,7 +54,6 @@ def apply_o2_style():
           /* =========================================================
              2) LABELY + INPUTY (aby byly vidět Email/Heslo)
              ========================================================= */
-          /* widget label */
           label[data-testid="stWidgetLabel"]{
             color: var(--text) !important;
             font-weight: 850 !important;
@@ -62,7 +61,6 @@ def apply_o2_style():
             margin-bottom: 6px !important;
           }
 
-          /* placeholder a text v inputu */
           input, textarea{
             color: var(--text) !important;
           }
@@ -70,7 +68,6 @@ def apply_o2_style():
             color: rgba(11,18,32,.40) !important;
           }
 
-          /* Inputs trochu kulatější */
           [data-baseweb="input"] > div,
           [data-baseweb="textarea"] > div{
             border-radius: 14px !important;
@@ -79,7 +76,6 @@ def apply_o2_style():
             box-shadow: 0 6px 16px rgba(11,18,32,.06) !important;
           }
 
-          /* focus ring */
           [data-baseweb="input"] > div:focus-within,
           [data-baseweb="textarea"] > div:focus-within{
             border-color: rgba(27,76,255,.55) !important;
@@ -108,38 +104,52 @@ def apply_o2_style():
           }
 
           /* =========================================================
-             4) BUTTON FIX
+             4) BUTTON FIX (včetně form_submit_button)
              ========================================================= */
-          .stButton > button{
+
+          /* společné */
+          .stButton > button,
+          .stFormSubmitButton > button{
             border-radius: 999px !important;
             font-weight: 800 !important;
             transition: all .15s ease !important;
           }
 
-          .stButton > button[kind="primary"]{
+          /* PRIMARY */
+          .stButton > button[kind="primary"],
+          .stFormSubmitButton > button[kind="primary"],
+          button[data-testid="baseButton-primary"]{
             background: var(--blue) !important;
             color: #fff !important;
             border: 0 !important;
             box-shadow: var(--shadow) !important;
           }
-          .stButton > button[kind="primary"]:hover{
+          .stButton > button[kind="primary"]:hover,
+          .stFormSubmitButton > button[kind="primary"]:hover,
+          button[data-testid="baseButton-primary"]:hover{
             filter: brightness(1.05) !important;
             transform: translateY(-1px);
           }
 
-          .stButton > button[kind="secondary"]{
+          /* SECONDARY */
+          .stButton > button[kind="secondary"],
+          .stFormSubmitButton > button[kind="secondary"],
+          button[data-testid="baseButton-secondary"]{
             background: #fff !important;
             color: var(--text) !important;
             border: 1px solid var(--border) !important;
             box-shadow: 0 6px 16px rgba(11,18,32,.08) !important;
           }
-          .stButton > button[kind="secondary"]:hover{
+          .stButton > button[kind="secondary"]:hover,
+          .stFormSubmitButton > button[kind="secondary"]:hover,
+          button[data-testid="baseButton-secondary"]:hover{
             border-color: rgba(27,76,255,.35) !important;
             box-shadow: 0 10px 24px rgba(11,18,32,.12) !important;
             transform: translateY(-1px);
           }
 
-          .stButton > button:disabled{
+          .stButton > button:disabled,
+          .stFormSubmitButton > button:disabled{
             opacity: .55 !important;
             cursor: not-allowed !important;
             transform: none !important;
@@ -205,10 +215,10 @@ def apply_o2_style():
             max-width: 42vw;
             height: 220px;
             border-radius: 22px;
-            background-size: contain;           /* ✅ pro logo */
-            background-repeat: no-repeat;       /* ✅ pro logo */
+            background-size: contain;
+            background-repeat: no-repeat;
             background-position: center;
-            background-color: rgba(255,255,255,.10); /* jemný “okno” efekt */
+            background-color: rgba(255,255,255,.10);
             box-shadow: 0 18px 50px rgba(0,0,0,.20);
           }
 
