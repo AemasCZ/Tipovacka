@@ -1,4 +1,3 @@
-# pages/4_Admin_Vyhodnoceni.py
 import os
 from datetime import datetime, timezone
 
@@ -341,9 +340,10 @@ else:
     st.info("Zatím nikdo netipoval výsledek pro tento zápas.")
 
 # =====================
-# SAVE
+# SAVE + RESET (ADMIN)
 # =====================
 with c3:
+    # ---- ULOŽIT VÝSLEDEK + PŘEPOČET ----
     if st.button("💾 Uložit výsledek + přepočítat body", type="primary"):
         try:
             now = datetime.now(timezone.utc).isoformat()
@@ -358,7 +358,6 @@ with c3:
             ).eq("id", match_id).execute()
 
             # 2) scorer_results: smaž staré a vlož nové (jen pro tipované střelce)
-            #    (takhle je to jednoduché a spolehlivé)
             supabase.table("scorer_results").delete().eq("match_id", match_id).execute()
 
             scorer_payload = []
@@ -429,3 +428,88 @@ with c3:
 
         except Exception as e:
             st.error(f"Chyba při ukládání / přepočtu: {e}")
+
+    # ---- SMAZAT HODNOCENÍ (RESET) ----
+    st.markdown("---")
+    is_evaluated = (m.get("final_home_score") is not None) or (m.get("final_away_score") is not None) or (m.get("evaluated_at") is not None)
+
+    with st.expander("🗑️ Reset / smazání hodnocení zápasu", expanded=False):
+        st.caption(
+            "Toto smaže výsledek zápasu, vymaže záznamy střelců, vynuluje body u všech tipů pro tento zápas "
+            "a správně odečte body z profiles.points."
+        )
+
+        confirm_reset = st.checkbox(
+            "⚠️ Rozumím tomu a chci smazat hodnocení (vrátit zápas do stavu 'nevyhodnocený')",
+            key=f"confirm_reset_{match_id}"
+        )
+
+        if st.button(
+            "🗑️ Smazat hodnocení zápasu",
+            type="secondary",
+            disabled=(not confirm_reset) or (not is_evaluated and not preds),
+            key=f"btn_reset_{match_id}"
+        ):
+            try:
+                # 1) načti aktuální body v predictions (kvůli odečtu z profiles)
+                preds_with_points = (
+                    supabase.table("predictions")
+                    .select("user_id, points_awarded")
+                    .eq("match_id", match_id)
+                    .execute()
+                ).data or []
+
+                delta_by_user = {}
+                for p in preds_with_points:
+                    uid = p.get("user_id")
+                    pts = int(p.get("points_awarded") or 0)
+                    if uid and pts != 0:
+                        # chceme odečíst, takže delta je záporná
+                        delta_by_user[uid] = delta_by_user.get(uid, 0) - pts
+
+                # 2) reset zápasu v matches
+                supabase.table("matches").update(
+                    {
+                        "final_home_score": None,
+                        "final_away_score": None,
+                        "evaluated_at": None,
+                    }
+                ).eq("id", match_id).execute()
+
+                # 3) reset predictions pro tento zápas
+                #    (Body = 0, detail & evaluated_at smažeme)
+                supabase.table("predictions").update(
+                    {
+                        "points_awarded": 0,
+                        "points_detail": None,
+                        "evaluated_at": None,
+                    }
+                ).eq("match_id", match_id).execute()
+
+                # 4) smaž scorer_results pro tento zápas
+                supabase.table("scorer_results").delete().eq("match_id", match_id).execute()
+
+                # 5) odečti body z profiles.points
+                if delta_by_user:
+                    uids = list(delta_by_user.keys())
+                    profs = (
+                        supabase.table("profiles")
+                        .select("user_id, points")
+                        .in_("user_id", uids)
+                        .execute()
+                    ).data or []
+
+                    current = {r["user_id"]: int(r.get("points") or 0) for r in profs}
+
+                    for uid, delta in delta_by_user.items():
+                        new_total = current.get(uid, 0) + int(delta)
+                        # pojistka proti záporným bodům
+                        supabase.table("profiles").update(
+                            {"points": max(new_total, 0)}
+                        ).eq("user_id", uid).execute()
+
+                st.success("🗑️ Hodnocení zápasu bylo smazáno. Zápas je zpět jako 'nevyhodnocený'.")
+                st.rerun()
+
+            except Exception as e:
+                st.error(f"Chyba při mazání hodnocení: {e}")
