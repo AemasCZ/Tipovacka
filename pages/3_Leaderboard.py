@@ -94,13 +94,12 @@ if is_admin:
     st.markdown("</div>", unsafe_allow_html=True)
 
 # =====================
-# Leaderboard (bere body z profiles.points)
+# Leaderboard (body ze součtu predictions.points_awarded)
 # =====================
 try:
     prof_res = (
         supabase.table("profiles")
-        .select("user_id, email, points")
-        .order("points", desc=True)
+        .select("user_id, email")
         .execute()
     )
     profiles = prof_res.data or []
@@ -108,14 +107,43 @@ except Exception as e:
     st.error(f"Nelze načíst profily (RLS?): {e}")
     st.stop()
 
-# slož tabulku
+try:
+    preds_res = (
+        supabase.table("predictions")
+        .select("user_id, points_awarded")
+        .execute()
+    )
+    preds = preds_res.data or []
+except Exception as e:
+    st.error(f"Nelze načíst tipy (RLS?): {e}")
+    st.stop()
+
+points_by_user = {}
+for p in preds:
+    uid = p.get("user_id")
+    if not uid:
+        continue
+    points_by_user[uid] = points_by_user.get(uid, 0) + int(p.get("points_awarded") or 0)
+
+rows = []
+for p in profiles:
+    uid = p.get("user_id")
+    rows.append(
+        {
+            "Uživatel": p.get("email") or uid,
+            "Body": int(points_by_user.get(uid, 0)),
+        }
+    )
+
+rows.sort(key=lambda r: r["Body"], reverse=True)
+
 table = []
-for i, p in enumerate(profiles, start=1):
+for i, r in enumerate(rows, start=1):
     table.append(
         {
             "#": i,
-            "Uživatel": p.get("email") or p.get("user_id"),
-            "Body": int(p.get("points") or 0),
+            "Uživatel": r["Uživatel"],
+            "Body": r["Body"],
         }
     )
 
