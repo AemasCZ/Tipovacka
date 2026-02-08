@@ -44,7 +44,7 @@ def apply_o2_style():
             --card: #ffffff;
             --text: #0b1220;
             --muted: rgba(11,18,32,.65);
-            --border: rgba(11,18,32,.10);
+            --border: rgba(11,18,32,.12);
             --shadow: 0 10px 28px rgba(11,18,32,.10);
             --blue: #1b4cff;
             --blue2:#0e2aa8;
@@ -54,15 +54,12 @@ def apply_o2_style():
           /* =========================================================
              2) BUTTON FIX (dlaždice + hráči jako střelci)
              ========================================================= */
-
-          /* Základ pro všechny Streamlit buttony */
           .stButton > button{
             border-radius: 999px !important;
-            font-weight: 700 !important;
+            font-weight: 800 !important;
             transition: all .15s ease !important;
           }
 
-          /* PRIMARY */
           .stButton > button[kind="primary"]{
             background: var(--blue) !important;
             color: #fff !important;
@@ -74,7 +71,6 @@ def apply_o2_style():
             transform: translateY(-1px);
           }
 
-          /* SECONDARY — bílé, čitelné */
           .stButton > button[kind="secondary"]{
             background: #fff !important;
             color: var(--text) !important;
@@ -87,25 +83,96 @@ def apply_o2_style():
             transform: translateY(-1px);
           }
 
-          /* Disabled buttons ať nevypadají jak bug */
           .stButton > button:disabled{
             opacity: .55 !important;
             cursor: not-allowed !important;
             transform: none !important;
           }
 
-          /* Inputs trochu kulatější */
-          [data-baseweb="input"] > div,
-          [data-baseweb="textarea"] > div{
+          /* =========================================================
+             3) INPUTS FIX (Email/Heslo byly tmavé)
+             ========================================================= */
+          /* wrapper */
+          [data-baseweb="input"] > div{
+            background: #fff !important;
+            border: 1px solid var(--border) !important;
             border-radius: 14px !important;
+            box-shadow: 0 6px 16px rgba(11,18,32,.06) !important;
+          }
+
+          /* input text */
+          [data-baseweb="input"] input{
+            color: var(--text) !important;
+            font-weight: 600 !important;
+          }
+
+          /* placeholder */
+          [data-baseweb="input"] input::placeholder{
+            color: rgba(11,18,32,.45) !important;
+            font-weight: 600 !important;
+          }
+
+          /* focus (modrá linka) */
+          [data-baseweb="input"] > div:focus-within{
+            border-color: rgba(27,76,255,.55) !important;
+            box-shadow: 0 0 0 4px rgba(27,76,255,.14) !important;
+          }
+
+          /* eye icon / input buttons */
+          [data-baseweb="input"] button{
+            color: rgba(11,18,32,.55) !important;
           }
 
           /* =========================================================
-             3) CARD STYL
+             4) TABS FIX (Přihlášení / Registrace nejsou vidět)
+             ========================================================= */
+          div[data-testid="stTabs"]{
+            margin-top: 6px;
+          }
+
+          /* tab list bar */
+          div[data-testid="stTabs"] [data-baseweb="tab-list"]{
+            gap: 10px !important;
+            border-bottom: 1px solid rgba(11,18,32,.10) !important;
+            padding-bottom: 6px !important;
+          }
+
+          /* each tab button */
+          div[data-testid="stTabs"] [data-baseweb="tab"]{
+            background: transparent !important;
+            border-radius: 999px !important;
+            padding: 10px 14px !important;
+            font-weight: 900 !important;
+            font-size: 15px !important;
+            color: rgba(11,18,32,.55) !important;
+            transition: all .12s ease !important;
+          }
+
+          /* selected tab */
+          div[data-testid="stTabs"] [data-baseweb="tab"][aria-selected="true"]{
+            color: var(--blue) !important;
+          }
+
+          /* selected underline */
+          div[data-testid="stTabs"] [data-baseweb="tab-highlight"]{
+            background: var(--blue) !important;
+            height: 3px !important;
+            border-radius: 999px !important;
+          }
+
+          /* hover tab */
+          div[data-testid="stTabs"] [data-baseweb="tab"]:hover{
+            color: rgba(11,18,32,.85) !important;
+            background: rgba(255,255,255,.65) !important;
+            border: 1px solid rgba(11,18,32,.08) !important;
+          }
+
+          /* =========================================================
+             5) CARD STYL
              ========================================================= */
           .o2-card{
             background: var(--card);
-            border: 1px solid var(--border);
+            border: 1px solid rgba(11,18,32,.10);
             border-radius: var(--radius);
             box-shadow: var(--shadow);
             padding: 16px 16px 10px 16px;
@@ -122,7 +189,7 @@ def apply_o2_style():
           }
 
           /* =========================================================
-             4) HERO STYL
+             6) HERO STYL
              ========================================================= */
           .o2-hero{
             border-radius: 28px;
@@ -166,7 +233,7 @@ def apply_o2_style():
           }
 
           /* =========================================================
-             5) TOPBAR
+             7) TOPBAR
              ========================================================= */
           .o2-topbar{
             background: rgba(255,255,255,.78);
@@ -181,7 +248,6 @@ def apply_o2_style():
             backdrop-filter: blur(10px);
           }
 
-          /* Alerty kulatější */
           [data-testid="stAlert"]{
             border-radius: 16px;
           }
