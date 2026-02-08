@@ -113,6 +113,11 @@ if not st.session_state.get("access_token") or not st.session_state.get("refresh
 user_id = user["id"]
 
 # =====================
+# ✅ Stav otevřeného dne (pro expander)
+# =====================
+OPEN_DAY_KEY = "open_day"  # uložíme ISO date string, např. "2026-02-08"
+
+# =====================
 # Pomocné funkce
 # =====================
 def parse_dt(x: str):
@@ -274,12 +279,11 @@ def load_players_for_team(team_name: str):
       team_name, full_name, role (ATT/DEF)
     + bonus:
       id, club_name, country3
-    (když tam máš i ligu, přidej si později do selectu)
     """
     try:
         res = (
             supabase.table("players")
-            .select("id, team_name, full_name, role, club_name, country3")
+            .select("id, team_name, full_name, role, club_name, country3, league_country3")
             .eq("team_name", team_name)
             .order("role")
             .order("full_name")
@@ -310,17 +314,15 @@ def upsert_base_prediction(match_id: str, home_score: int, away_score: int):
         "home_score": int(home_score),
         "away_score": int(away_score),
     }
-    # tohle MUSÍ fungovat (jinak je problém RLS / constraint)
     supabase.table("predictions").upsert(base_payload, on_conflict="user_id,match_id").execute()
 
 def update_scorer(match_id: str, scorer_payload: dict):
-    # update scorer_* po vytvoření řádku
     supabase.table("predictions").update(scorer_payload).eq("user_id", user_id).eq("match_id", match_id).execute()
 
 # =====================
 # SAVE střelce (klik = uložit) – zachová aktuální skóre z inputů
 # =====================
-def save_scorer(match_id: str, player: dict, team_name: str):
+def save_scorer(match_id: str, player: dict, team_name: str, match_day: date):
     current_home = int(st.session_state.get(f"h_{match_id}", pred_by_match.get(match_id, {}).get("home_score", 0) or 0))
     current_away = int(st.session_state.get(f"a_{match_id}", pred_by_match.get(match_id, {}).get("away_score", 0) or 0))
 
@@ -330,38 +332,36 @@ def save_scorer(match_id: str, player: dict, team_name: str):
     scorer_player_id = str(raw_player_id) if is_uuid(raw_player_id) else None
 
     scorer_payload = {
-        "scorer_player_id": scorer_player_id,  # uuid nebo None (NE string "Team:Name:Role")
+        "scorer_player_id": scorer_player_id,
         "scorer_name": full_name,
         "scorer_flag": team_flag(team_name),
         "scorer_team": team_name,
     }
 
     try:
-        # 1) vždycky vytvoř/aktualizuj základní tip
         upsert_base_prediction(match_id, current_home, current_away)
-
-        # 2) potom update scorer_*
         update_scorer(match_id, scorer_payload)
+
+        # ✅ drž otevřený expander dne i po výběru střelce
+        st.session_state[OPEN_DAY_KEY] = match_day.isoformat()
 
         st.success(f"Střelec uložen ✅ {scorer_payload['scorer_flag']} {full_name}")
         st.rerun()
     except Exception as e:
-        st.error("Uložení střelce selhalo – tohle je důvod (nejspíš chybí scorer_* sloupce nebo RLS):")
+        st.error("Uložení střelce selhalo – důvod (nejspíš chybí scorer_* sloupce nebo RLS):")
         st.code(str(e))
 
 def player_label(p: dict):
     full_name = clean_name(safe_get(p, "full_name", "Neznámý hráč"))
     club = safe_get(p, "club_name", "") or "—"
-    # Vždy použij league_country3 (nebo country3 jako fallback)
     league_c3 = safe_get(p, "league_country3", "") or safe_get(p, "country3", "")
     cf = club_country_flag(league_c3)
-    return f"{full_name}\n({club} {cf})"
     return f"{full_name}\n({club} {cf})"
 
 # =====================
 # Render hráčů pro tým – 3 na řádek, nejdřív Útočníci pak Obránci
 # =====================
-def render_team_players_full(team_name: str, match_id: str, side: str):
+def render_team_players_full(team_name: str, match_id: str, side: str, match_day: date):
     players = load_players_for_team(team_name)
 
     atts = [p for p in players if safe_get(p, "role") == "ATT"]
@@ -383,7 +383,7 @@ def render_team_players_full(team_name: str, match_id: str, side: str):
                     type="secondary",
                     use_container_width=True,
                 ):
-                    save_scorer(match_id, p, team_name)
+                    save_scorer(match_id, p, team_name, match_day)
 
     st.write("")
 
@@ -401,22 +401,22 @@ def render_team_players_full(team_name: str, match_id: str, side: str):
                     type="secondary",
                     use_container_width=True,
                 ):
-                    save_scorer(match_id, p, team_name)
+                    save_scorer(match_id, p, team_name, match_day)
 
 # =====================
-# UI – výběr střelců: 2 bloky vedle sebe + jemná mezera uprostřed
+# UI – výběr střelců: 2 bloky vedle sebe
 # =====================
-def render_scorers_section(match_id: str, home_team: str, away_team: str):
+def render_scorers_section(match_id: str, home_team: str, away_team: str, match_day: date):
     st.markdown("<hr/>", unsafe_allow_html=True)
     st.markdown('<div class="sec-title">⚽ Vyber střelce (klik = uložit)</div>', unsafe_allow_html=True)
 
     left, gap, right = st.columns([1, 0.06, 1], vertical_alignment="top")
     with left:
-        render_team_players_full(home_team, match_id, side="home")
+        render_team_players_full(home_team, match_id, side="home", match_day=match_day)
     with gap:
         st.write("")
     with right:
-        render_team_players_full(away_team, match_id, side="away")
+        render_team_players_full(away_team, match_id, side="away", match_day=match_day)
 
 # =====================
 # Řádek zápasu
@@ -424,10 +424,11 @@ def render_scorers_section(match_id: str, home_team: str, away_team: str):
 def match_row(m: dict):
     match_id = m["id"]
     dt = m["_dt"]
+    match_day = dt.date()
     time_str = dt.strftime("%H:%M")
 
     p = pred_by_match.get(match_id, {})
-    has_tip = match_id in pred_by_match  # jistější než bool(p)
+    has_tip = match_id in pred_by_match
 
     status = f"✅ Natipováno ({p.get('home_score', 0)} : {p.get('away_score', 0)})" if has_tip else "⏳ Chybí tip"
 
@@ -484,7 +485,7 @@ def match_row(m: dict):
             try:
                 upsert_base_prediction(match_id, int(home_score), int(away_score))
 
-                # zachovej střelce, pokud existuje (jen když DB má sloupce)
+                # zachovej střelce, pokud existuje
                 if p.get("scorer_name"):
                     try:
                         update_scorer(match_id, {
@@ -495,6 +496,9 @@ def match_row(m: dict):
                         })
                     except Exception:
                         pass
+
+                # ✅ po uložení drž otevřený expander daného dne
+                st.session_state[OPEN_DAY_KEY] = match_day.isoformat()
 
                 st.success("Tip uložen ✅")
                 st.rerun()
@@ -510,7 +514,7 @@ def match_row(m: dict):
     else:
         st.caption("Zatím nevybrán žádný střelec.")
 
-    render_scorers_section(match_id, m["home_team"], m["away_team"])
+    render_scorers_section(match_id, m["home_team"], m["away_team"], match_day=match_day)
 
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -528,7 +532,10 @@ else:
         total = len(ms)
         done = sum(1 for mm in ms if mm["id"] in pred_by_match)
 
-        with st.expander(f"{day_label(d)}  •  Natipováno {done}/{total}", expanded=False):
+        day_key = d.isoformat()
+        is_open = st.session_state.get(OPEN_DAY_KEY) == day_key
+
+        with st.expander(f"{day_label(d)}  •  Natipováno {done}/{total}", expanded=is_open):
             for mm in ms:
                 match_row(mm)
 
@@ -541,6 +548,9 @@ else:
         total = len(ms)
         done = sum(1 for mm in ms if mm["id"] in pred_by_match)
 
-        with st.expander(f"{day_label(d)}  •  Natipováno {done}/{total}", expanded=False):
+        day_key = d.isoformat()
+        is_open = st.session_state.get(OPEN_DAY_KEY) == day_key
+
+        with st.expander(f"{day_label(d)}  •  Natipováno {done}/{total}", expanded=is_open):
             for mm in ms:
                 match_row(mm)

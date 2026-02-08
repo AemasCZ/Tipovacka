@@ -42,12 +42,27 @@ st.markdown(
 # =====================
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+APP_BASE_URL = os.getenv("APP_BASE_URL")
 
 if not SUPABASE_URL or not SUPABASE_ANON_KEY:
     st.error("Chybí SUPABASE_URL nebo SUPABASE_ANON_KEY v .env / Secrets")
     st.stop()
 
 supabase = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+
+# =====================
+# Helper: query params
+# =====================
+def get_query_param(name: str):
+    try:
+        val = st.query_params.get(name)
+        if isinstance(val, list):
+            return val[0] if val else None
+        return val
+    except Exception:
+        params = st.experimental_get_query_params()
+        vals = params.get(name)
+        return vals[0] if vals else None
 
 # Obnovení session (pokud už je uložená)
 if st.session_state.get("access_token") and st.session_state.get("refresh_token"):
@@ -133,6 +148,9 @@ if user:
 # ===== LOGIN / REGISTRACE =====
 st.title("🔐 Přihlášení")
 
+if get_query_param("verified") == "1":
+    st.success("Email byl úspěšně potvrzen ✅ Přihlaš se níže.")
+
 tab_login, tab_signup = st.tabs(["Přihlášení", "Registrace"])
 
 # ---------------------
@@ -180,7 +198,12 @@ with tab_signup:
             st.error("Heslo musí mít alespoň 6 znaků.")
         else:
             try:
-                supabase.auth.sign_up({"email": new_email, "password": new_pw})
+                signup_payload = {"email": new_email, "password": new_pw}
+                if APP_BASE_URL:
+                    signup_payload["options"] = {
+                        "emailRedirectTo": f"{APP_BASE_URL}/?verified=1"
+                    }
+                supabase.auth.sign_up(signup_payload)
                 st.success(
                     "Registrace proběhla ✅ Teď se přihlas."
                     " (Pokud je zapnuté potvrzení emailu, přijde ti email.)"

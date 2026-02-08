@@ -240,39 +240,61 @@ default_h = 0 if m.get("final_home_score") is None else int(m["final_home_score"
 default_a = 0 if m.get("final_away_score") is None else int(m["final_away_score"])
 
 with c1:
-    final_home = st.number_input("Skutečný počet gólů domácí", min_value=0, max_value=30, value=default_h)
+    st.markdown(f"**Skutečný počet gólů domácí**")
+    final_home = st.number_input(
+        m['home_team'],
+        min_value=0,
+        max_value=20,
+        value=default_h,
+        step=1,
+        key=f"final_home_{match_id}",
+        label_visibility="collapsed",
+    )
+
 with c2:
-    final_away = st.number_input("Skutečný počet gólů hosté", min_value=0, max_value=30, value=default_a)
+    st.markdown(f"**Skutečný počet gólů hosté**")
+    final_away = st.number_input(
+        m['away_team'],
+        min_value=0,
+        max_value=20,
+        value=default_a,
+        step=1,
+        key=f"final_away_{match_id}",
+        label_visibility="collapsed",
+    )
 
 st.markdown("</div>", unsafe_allow_html=True)
 
 # =====================
-# Scorer results: load existing for match
+# Load existing scorer_results
 # =====================
 existing_scorers = {}
 try:
-    sres = (
+    sr_res = (
         supabase.table("scorer_results")
         .select("scorer_player_id, scorer_name, scorer_team, did_score")
         .eq("match_id", match_id)
         .execute()
     )
-    for r in (sres.data or []):
-        key = (str(r.get("scorer_player_id") or ""), (r.get("scorer_name") or "").strip(), (r.get("scorer_team") or "").strip())
-        existing_scorers[key] = bool(r.get("did_score", False))
+    for r in (sr_res.data or []):
+        key = (str(r.get("scorer_player_id") or ""), r.get("scorer_name") or "", (r.get("scorer_team") or "").strip())
+        existing_scorers[key] = bool(r.get("did_score"))
 except Exception:
-    existing_scorers = {}
+    pass
 
 # =====================
-# Group scorers from predictions
+# Group tipovaní střelci
 # =====================
 scorer_groups = {}
 for p in preds:
-    name = (p.get("scorer_name") or "").strip()
-    if not name:
+    sname = (p.get("scorer_name") or "").strip()
+    if not sname:
         continue
-    key = (str(p.get("scorer_player_id") or ""), name, (p.get("scorer_team") or "").strip())
-    scorer_groups.setdefault(key, [])
+    team = (p.get("scorer_team") or "").strip()
+    pid = str(p.get("scorer_player_id") or "")
+    key = (pid, sname, team)
+    if key not in scorer_groups:
+        scorer_groups[key] = []
     scorer_groups[key].append(p)
 
 st.markdown("---")
@@ -330,7 +352,7 @@ for p in preds:
             "Body": pts,
             "Původně": old_pts,
             "Δ": pts - old_pts,
-            "Detail": detail,
+            "Detail": str(detail),
         }
     )
 
@@ -345,89 +367,115 @@ else:
 with c3:
     # ---- ULOŽIT VÝSLEDEK + PŘEPOČET ----
     if st.button("💾 Uložit výsledek + přepočítat body", type="primary"):
-        try:
-            now = datetime.now(timezone.utc).isoformat()
+        with st.spinner("Ukládám výsledek a přepočítávám body..."):
+            errors = []
+            success_steps = []
+            
+            try:
+                now = datetime.now(timezone.utc).isoformat()
 
-            # 1) ulož výsledek do matches
-            supabase.table("matches").update(
-                {
-                    "final_home_score": int(final_home),
-                    "final_away_score": int(final_away),
-                    "evaluated_at": now,
-                }
-            ).eq("id", match_id).execute()
+                # 1) ulož výsledek do matches
+                try:
+                    supabase.table("matches").update(
+                        {
+                            "final_home_score": int(final_home),
+                            "final_away_score": int(final_away),
+                            "evaluated_at": now,
+                        }
+                    ).eq("id", match_id).execute()
+                    success_steps.append("✅ Výsledek zápasu uložen")
+                except Exception as e:
+                    errors.append(f"❌ Chyba při ukládání výsledku zápasu: {e}")
 
-            # 2) scorer_results: smaž staré a vlož nové (jen pro tipované střelce)
-            supabase.table("scorer_results").delete().eq("match_id", match_id).execute()
+                # 2) scorer_results: smaž staré a vlož nové (jen pro tipované střelce)
+                try:
+                    supabase.table("scorer_results").delete().eq("match_id", match_id).execute()
+                    success_steps.append("✅ Staré záznamy střelců smazány")
+                except Exception as e:
+                    errors.append(f"⚠️ Varování při mazání starých střelců: {e}")
 
-            scorer_payload = []
-            for key, did in scorer_state.items():
-                pid, name, team = key
-                scorer_payload.append(
-                    {
-                        "match_id": match_id,  # BIGINT
-                        "scorer_player_id": pid if pid else None,  # uuid nebo None
-                        "scorer_name": name,
-                        "scorer_team": team or None,
-                        "did_score": bool(did),
-                    }
-                )
+                scorer_payload = []
+                for key, did in scorer_state.items():
+                    pid, name, team = key
+                    scorer_payload.append(
+                        {
+                            "match_id": match_id,  # BIGINT
+                            "scorer_player_id": pid if pid else None,  # uuid nebo None
+                            "scorer_name": name,
+                            "scorer_team": team or None,
+                            "did_score": bool(did),
+                        }
+                    )
 
-            if scorer_payload:
-                supabase.table("scorer_results").insert(scorer_payload).execute()
+                if scorer_payload:
+                    try:
+                        supabase.table("scorer_results").insert(scorer_payload).execute()
+                        success_steps.append(f"✅ Uloženo {len(scorer_payload)} záznamů střelců")
+                    except Exception as e:
+                        errors.append(f"❌ Chyba při ukládání střelců: {e}")
 
-            # 3) přepočet bodů + update predictions + update profiles.points (delta)
-            delta_by_user = {}
+                # 3) přepočet bodů + update predictions
+                updated_preds = 0
+                failed_preds = 0
+                
+                for p in preds:
+                    try:
+                        ph = int(p.get("home_score") or 0)
+                        pa = int(p.get("away_score") or 0)
 
-            for p in preds:
-                ph = int(p.get("home_score") or 0)
-                pa = int(p.get("away_score") or 0)
+                        sname = (p.get("scorer_name") or "").strip()
+                        if sname:
+                            skey = (str(p.get("scorer_player_id") or ""), sname, (p.get("scorer_team") or "").strip())
+                            scorer_ok = bool(scorer_state.get(skey, False))
+                        else:
+                            scorer_ok = False
 
-                sname = (p.get("scorer_name") or "").strip()
-                if sname:
-                    skey = (str(p.get("scorer_player_id") or ""), sname, (p.get("scorer_team") or "").strip())
-                    scorer_ok = bool(scorer_state.get(skey, False))
+                        new_pts, detail = calc_points(ph, pa, int(final_home), int(final_away), scorer_ok)
+
+                        # update predictions
+                        supabase.table("predictions").update(
+                            {
+                                "points_awarded": int(new_pts),
+                                "evaluated_at": now,
+                                "points_detail": detail,
+                            }
+                        ).eq("user_id", p["user_id"]).eq("match_id", match_id).execute()
+                        
+                        updated_preds += 1
+                        
+                    except Exception as e:
+                        failed_preds += 1
+                        email = user_emails.get(p.get("user_id"), "unknown")
+                        errors.append(f"⚠️ Chyba při ukládání tipu pro {email}: {e}")
+
+                if updated_preds > 0:
+                    success_steps.append(f"✅ Aktualizováno {updated_preds} tipů")
+                if failed_preds > 0:
+                    errors.append(f"⚠️ Selhalo {failed_preds} tipů")
+
+                # 4) Zobraz výsledky
+                st.markdown("### 📊 Výsledek operace")
+                
+                for step in success_steps:
+                    st.success(step)
+                
+                for error in errors:
+                    st.error(error)
+                
+                if not errors:
+                    st.balloons()
+                    st.success("🎉 Vše proběhlo v pořádku!")
+                    st.info("💡 Tip: Nyní běž na Leaderboard a klikni na 'Synchronizace bodů' pro přepočet celkových bodů všech hráčů.")
+                    
+                    if st.button("➡️ Přejít na Synchronizaci bodů"):
+                        st.switch_page("pages/5_Admin_Sync_Points.py")
                 else:
-                    scorer_ok = False
+                    st.warning("⚠️ Operace proběhla s chybami. Zkontroluj výše uvedené chyby.")
 
-                new_pts, detail = calc_points(ph, pa, int(final_home), int(final_away), scorer_ok)
-                old_pts = int(p.get("points_awarded") or 0)
-                delta = new_pts - old_pts
-
-                # update predictions (předpoklad: unikát (user_id, match_id))
-                supabase.table("predictions").update(
-                    {
-                        "points_awarded": int(new_pts),
-                        "evaluated_at": now,
-                        "points_detail": detail,
-                    }
-                ).eq("user_id", p["user_id"]).eq("match_id", match_id).execute()
-
-                if delta != 0:
-                    delta_by_user[p["user_id"]] = delta_by_user.get(p["user_id"], 0) + delta
-
-            # 4) update profiles.points
-            if delta_by_user:
-                # načti aktuální body
-                uids = list(delta_by_user.keys())
-                profs = (
-                    supabase.table("profiles")
-                    .select("user_id, points")
-                    .in_("user_id", uids)
-                    .execute()
-                ).data or []
-
-                current = {r["user_id"]: int(r.get("points") or 0) for r in profs}
-
-                for uid, d in delta_by_user.items():
-                    new_total = current.get(uid, 0) + int(d)
-                    supabase.table("profiles").update({"points": new_total}).eq("user_id", uid).execute()
-
-            st.success("Hotovo ✅ Výsledek uložen, střelci vyhodnoceni a body přepočítány.")
-            st.rerun()
-
-        except Exception as e:
-            st.error(f"Chyba při ukládání / přepočtu: {e}")
+            except Exception as e:
+                st.error(f"❌ Kritická chyba: {e}")
+                import traceback
+                st.code(traceback.format_exc())
 
     # ---- SMAZAT HODNOCENÍ (RESET) ----
     st.markdown("---")
