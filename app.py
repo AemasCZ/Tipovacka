@@ -72,7 +72,7 @@ def cooldown_ok(key: str, seconds: int = 10) -> bool:
 # ---------------------
 # HERO
 # ---------------------
-logo_path = "assets/milano_cortina.png"
+logo_path = "assets/img_0121.avif"
 
 render_hero(
     "Tipovačka",
