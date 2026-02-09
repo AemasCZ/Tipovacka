@@ -30,7 +30,7 @@ render_top_menu(user, supabase=supabase, user_id=user_id)
 render_hero(
     "Leaderboard",
     "Součet bodů ze zápasů + umístění. Počítáno živě z databáze.",
-    image_path="assets/olymp.png",
+    image_path="assets/olympic.jpeg",
 )
 
 if not user:

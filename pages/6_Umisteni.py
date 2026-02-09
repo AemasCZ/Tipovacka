@@ -33,7 +33,7 @@ render_top_menu(user, supabase=supabase, user_id=user_id)
 render_hero(
     "Umístění",
     "Tipuj číslo (0–99). Tipování je otevřené do dne před soutěží (a do lock_at, pokud je nastaven).",
-    image_path="assets/olymp.png",
+    image_path="assets/olympic.jpeg",
 )
 
 if not user:

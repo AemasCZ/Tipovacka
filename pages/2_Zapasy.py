@@ -34,7 +34,7 @@ render_top_menu(user, supabase=supabase, user_id=user_id)
 render_hero(
     "Zápasy",
     "Tipuj výsledek a střelce. Klik na hráče uloží střelce okamžitě.",
-    image_path="assets/olymp.png",
+    image_path="assets/olympic.jpeg",
 )
 
 # Guard login
