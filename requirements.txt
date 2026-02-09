@@ -1,3 +1,33 @@
-streamlit
-supabase
-python-dotenv
+# ===================================
+# STREAMLIT TIPOVAČKA - REQUIREMENTS
+# ===================================
+
+# Core dependencies
+streamlit>=1.32.0
+supabase>=2.3.0
+python-dotenv>=1.0.0
+
+# Pandas je potřeba pro Admin vyhodnocení (4_Admin_Vyhodnoceni.py)
+pandas>=2.0.0
+
+# Další dependencies, které Supabase a Streamlit používají
+# (měly by se nainstalovat automaticky, ale pro jistotu)
+requests>=2.31.0
+httpx>=0.24.0
+
+# Pro lepší kompatibilitu
+typing-extensions>=4.5.0
+
+# ===================================
+# POZNÁMKY
+# ===================================
+# 
+# Pokud používáš Streamlit Cloud:
+# - Tento soubor stačí nahrát do rootu projektu
+# - Streamlit Cloud automaticky nainstaluje všechny dependencies
+#
+# Pokud používáš lokálně:
+# - pip install -r requirements.txt
+#
+# Pro aktualizaci všech balíčků:
+# - pip install --upgrade -r requirements.txt
