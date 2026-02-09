@@ -4,19 +4,10 @@ import streamlit as st
 
 
 def _img_to_base64(path: str) -> str:
-    """Bezpečnější načítání base64 s error handlingem"""
-    try:
-        p = Path(path)
-        if not p.exists():
-            return ""
-        # Přidáme kontrolu velikosti - max 1MB
-        if p.stat().st_size > 1_000_000:
-            st.warning(f"Obrázek {path} je příliš velký (>1MB), nebude načten v hero sekci.")
-            return ""
-        return base64.b64encode(p.read_bytes()).decode("utf-8")
-    except Exception as e:
-        st.warning(f"Nelze načíst obrázek {path}: {e}")
+    p = Path(path)
+    if not p.exists():
         return ""
+    return base64.b64encode(p.read_bytes()).decode("utf-8")
 
 
 def apply_o2_style():
@@ -92,7 +83,7 @@ def apply_o2_style():
           }
 
           /* =========================================================
-             3) TABS (Přihlášení / Registrace) — výraznější
+             3) TABS (Přihlášení / Registrace) – výraznější
              ========================================================= */
           [data-testid="stTabs"]{
             margin-top: 6px !important;
@@ -186,7 +177,7 @@ def apply_o2_style():
           }
 
           /* =========================================================
-             6) HERO STYL + LOGO BOX - OPRAVENO
+             6) HERO STYL + LOGO BOX
              ========================================================= */
           .o2-hero{
             border-radius: 28px;
@@ -229,9 +220,6 @@ def apply_o2_style():
             background-position: center;
             background-color: rgba(255,255,255,.10);
             box-shadow: 0 18px 50px rgba(0,0,0,.20);
-            /* ✅ FIX: Zajistíme že se base64 správně načte */
-            image-rendering: -webkit-optimize-contrast;
-            image-rendering: crisp-edges;
           }
 
           /* =========================================================
@@ -265,51 +253,26 @@ def apply_o2_style():
 
 
 def render_hero(title: str, subtitle: str, image_path: str | None = None):
-    """
-    ✅ OPRAVENÁ VERZE s fallbackem a error handlingem
-    Pokud selže načtení obrázku, zobrazí se jen text bez obrázku
-    """
     img_style = ""
-    show_image = False
-    
     if image_path:
-        try:
-            b64 = _img_to_base64(image_path)
-            if b64:
-                img_style = f"background-image:url('data:image/png;base64,{b64}');"
-                show_image = True
-        except Exception as e:
-            st.warning(f"⚠️ Hero obrázek se nepodařilo načíst: {e}")
-            show_image = False
+        b64 = _img_to_base64(image_path)
+        if b64:
+            img_style = f"background-image:url('data:image/png;base64,{b64}');"
 
-    # Pokud není obrázek, zobrazíme jen textovou část
-    if not show_image:
-        st.markdown(
-            f"""
-            <div class="o2-hero">
-              <div style="min-width:320px;flex:1">
-                <h1>{title}</h1>
-                <p>{subtitle}</p>
-              </div>
+    st.markdown(
+        f"""
+        <div class="o2-hero">
+          <div class="o2-hero-grid">
+            <div style="min-width:320px;flex:1">
+              <h1>{title}</h1>
+              <p>{subtitle}</p>
             </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    else:
-        st.markdown(
-            f"""
-            <div class="o2-hero">
-              <div class="o2-hero-grid">
-                <div style="min-width:320px;flex:1">
-                  <h1>{title}</h1>
-                  <p>{subtitle}</p>
-                </div>
-                <div class="o2-hero-img" style="{img_style}"></div>
-              </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+            <div class="o2-hero-img" style="{img_style}"></div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def card(title: str, subtitle: str | None = None):
