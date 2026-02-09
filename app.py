@@ -1,179 +1,166 @@
-#!/usr/bin/env python3
-"""
-🔧 Rychlá diagnostika a oprava Streamlit aplikace
-Spusť: python fix_app.py
-"""
-
 import os
-import sys
-import shutil
-from pathlib import Path
+import time
+import streamlit as st
+from dotenv import load_dotenv
+from supabase import create_client
 
+from ui_layout import apply_o2_style, render_hero, card
 
-def check_file_exists(filepath: str) -> bool:
-    """Zkontroluje existenci souboru"""
-    return Path(filepath).exists()
+load_dotenv()
 
+st.set_page_config(page_title="Tipovačka", page_icon="🏒", layout="wide")
+apply_o2_style()
 
-def backup_file(filepath: str):
-    """Vytvoří zálohu souboru"""
-    if check_file_exists(filepath):
-        backup_path = f"{filepath}.backup"
-        shutil.copy2(filepath, backup_path)
-        print(f"✅ Záloha vytvořena: {backup_path}")
-        return True
-    return False
+# ---------------------
+# Supabase
+# ---------------------
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+    st.error("Chybí SUPABASE_URL nebo SUPABASE_ANON_KEY v .env / Secrets")
+    st.stop()
 
+supabase = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
-def main():
-    print("🔍 Diagnostika Streamlit Tipovačky")
-    print("=" * 50)
-    
-    # 1. Kontrola Python verze
-    print("\n1️⃣ Kontrola Python verze...")
-    python_version = sys.version_info
-    if python_version >= (3, 8):
-        print(f"   ✅ Python {python_version.major}.{python_version.minor}.{python_version.micro}")
-    else:
-        print(f"   ❌ Python {python_version.major}.{python_version.minor} - potřebuješ 3.8+")
-        return
-    
-    # 2. Kontrola souborů
-    print("\n2️⃣ Kontrola souborů...")
-    required_files = {
-        "app.py": True,
-        "ui_layout.py": True,
-        "ui_menu.py": True,
-        "requirements.txt": True,
-        ".env": False,  # Nepovinný - může být v secrets
-    }
-    
-    all_ok = True
-    for file, required in required_files.items():
-        exists = check_file_exists(file)
-        if exists:
-            print(f"   ✅ {file}")
-        elif required:
-            print(f"   ❌ {file} - CHYBÍ (KRITICKÉ)")
-            all_ok = False
-        else:
-            print(f"   ⚠️  {file} - chybí (není kritické)")
-    
-    if not all_ok:
-        print("\n❌ Některé důležité soubory chybí!")
-        return
-    
-    # 3. Kontrola requirements
-    print("\n3️⃣ Kontrola dependencies...")
+# Pokud už máš tokeny, navážeme session (kvůli RLS)
+if st.session_state.get("access_token") and st.session_state.get("refresh_token"):
     try:
-        import streamlit
-        print(f"   ✅ streamlit {streamlit.__version__}")
-    except ImportError:
-        print("   ❌ streamlit není nainstalován")
-        print("      Spusť: pip install streamlit")
-    
+        supabase.auth.set_session(
+            st.session_state["access_token"],
+            st.session_state["refresh_token"],
+        )
+    except Exception:
+        pass
+
+
+# ---------------------
+# Helpers
+# ---------------------
+def set_logged_in_session(auth_response):
+    sess = getattr(auth_response, "session", None) or auth_response.get("session")
+    usr = getattr(auth_response, "user", None) or auth_response.get("user")
+
+    if not sess or not usr:
+        raise Exception("Chybí session/user v auth response.")
+
+    st.session_state["access_token"] = sess.access_token
+    st.session_state["refresh_token"] = sess.refresh_token
+    st.session_state["user"] = {"id": usr.id, "email": usr.email}
+
+    supabase.auth.set_session(sess.access_token, sess.refresh_token)
+
+
+def try_ensure_profile_row(user_id: str, email: str):
     try:
-        import supabase
-        print(f"   ✅ supabase")
-    except ImportError:
-        print("   ❌ supabase není nainstalován")
-        print("      Spusť: pip install supabase")
-    
-    try:
-        import dotenv
-        print(f"   ✅ python-dotenv")
-    except ImportError:
-        print("   ❌ python-dotenv není nainstalován")
-        print("      Spusť: pip install python-dotenv")
-    
-    # 4. Kontrola env variables
-    print("\n4️⃣ Kontrola environment variables...")
-    from dotenv import load_dotenv
-    load_dotenv()
-    
-    supabase_url = os.getenv("SUPABASE_URL")
-    supabase_key = os.getenv("SUPABASE_ANON_KEY")
-    
-    if supabase_url:
-        print(f"   ✅ SUPABASE_URL nalezena")
-    else:
-        print(f"   ❌ SUPABASE_URL chybí v .env")
-    
-    if supabase_key:
-        print(f"   ✅ SUPABASE_ANON_KEY nalezena")
-    else:
-        print(f"   ❌ SUPABASE_ANON_KEY chybí v .env")
-    
-    # 5. Nabídka opravy
-    print("\n5️⃣ Opravy...")
-    
-    if check_file_exists("ui_layout.py") and check_file_exists("ui_layout_fixed.py"):
-        print("   Nalezena opravená verze ui_layout.py")
-        response = input("   Chceš nahradit ui_layout.py za opravenou verzi? (y/n): ")
-        
-        if response.lower() == 'y':
-            backup_file("ui_layout.py")
-            shutil.copy2("ui_layout_fixed.py", "ui_layout.py")
-            print("   ✅ ui_layout.py nahrazena opravenou verzí")
-    
-    # 6. Kontrola pages/
-    print("\n6️⃣ Kontrola stránek...")
-    pages_dir = Path("pages")
-    if pages_dir.exists():
-        pages = list(pages_dir.glob("*.py"))
-        print(f"   ✅ Nalezeno {len(pages)} stránek:")
-        for page in sorted(pages):
-            print(f"      - {page.name}")
-        
-        # Zkontroluj diagnostickou stránku
-        if not check_file_exists("pages/_Diagnostika.py") and check_file_exists("pages_Diagnostika.py"):
-            response = input("\n   Chceš přidat diagnostickou stránku? (y/n): ")
-            if response.lower() == 'y':
-                shutil.copy2("pages_Diagnostika.py", "pages/_Diagnostika.py")
-                print("   ✅ Diagnostická stránka přidána")
-    else:
-        print(f"   ❌ Složka pages/ neexistuje")
-    
-    # 7. Kontrola assets/
-    print("\n7️⃣ Kontrola assets...")
-    assets_dir = Path("assets")
-    if assets_dir.exists():
-        images = list(assets_dir.glob("*.jpeg")) + list(assets_dir.glob("*.png"))
-        print(f"   ✅ Nalezeno {len(images)} obrázků")
-        for img in images:
-            size_kb = img.stat().st_size / 1024
-            print(f"      - {img.name} ({size_kb:.1f} KB)")
-    else:
-        print(f"   ⚠️  Složka assets/ neexistuje (není kritické)")
-    
-    # 8. Doporučení
-    print("\n" + "=" * 50)
-    print("📋 DOPORUČENÍ PRO KOLEGU:")
-    print("=" * 50)
-    print("""
-1. Vyčisti Chrome cache (Ctrl+Shift+Del)
-2. Zkus Incognito režim (Ctrl+Shift+N)
-3. Zkus jiný prohlížeč (Firefox, Edge)
-4. Zkontroluj volné místo na disku (min 1GB)
-5. Otevři Developer Tools (F12) a zkontroluj Console
-6. Pokud vidíš FILE_ERROR_NO_SPACE → vyčisti cache
-
-Pro spuštění aplikace:
-    streamlit run app.py
-
-Pro zobrazení diagnostiky:
-    Otevři aplikaci a přejdi na stránku "_Diagnostika"
-""")
-    
-    print("\n✅ Diagnostika dokončena!")
+        supabase.table("profiles").upsert(
+            {"user_id": user_id, "email": email},
+            on_conflict="user_id",
+        ).execute()
+    except Exception:
+        pass
 
 
-if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        print("\n\n⚠️  Diagnostika přerušena uživatelem")
-    except Exception as e:
-        print(f"\n❌ Chyba při diagnostice: {e}")
-        import traceback
-        traceback.print_exc()
+def cooldown_ok(key: str, seconds: int = 10) -> bool:
+    now = time.time()
+    last = st.session_state.get(key, 0.0)
+    if now - last < seconds:
+        return False
+    st.session_state[key] = now
+    return True
+
+
+# ---------------------
+# HERO
+# ---------------------
+logo_path = "assets/olympic.jpeg"
+
+render_hero(
+    "Tipovačka",
+    "Milano Cortina 2026 • tipuj výsledky, střelce a umístění.",
+    image_path=logo_path,
+)
+
+# Pokud je user přihlášený, nabídneme rozcestník
+user = st.session_state.get("user")
+if user:
+    with card("✅ Jsi přihlášený", f"{user.get('email', '')}"):
+        col1, col2, col3 = st.columns([1, 1, 1], gap="large")
+        with col1:
+            if st.button("🏒 Jít na Zápasy", type="primary", use_container_width=True):
+                st.switch_page("pages/2_Zapasy.py")
+        with col2:
+            if st.button("🏆 Jít na Leaderboard", type="secondary", use_container_width=True):
+                st.switch_page("pages/3_Leaderboard.py")
+        with col3:
+            if st.button("🚪 Odhlásit", type="secondary", use_container_width=True):
+                for k in ["access_token", "refresh_token", "user"]:
+                    if k in st.session_state:
+                        del st.session_state[k]
+                st.rerun()
+    st.stop()
+
+
+# ---------------------
+# AUTH UI (tabs)
+# ---------------------
+tab_login, tab_register = st.tabs(["Přihlášení", "Registrace"])
+
+# ================
+# LOGIN
+# ================
+with tab_login:
+    with card("🔐 Přihlášení", "Zadej email a heslo"):
+        with st.form("login_form", clear_on_submit=False):
+            email = st.text_input("Email", placeholder="např. jiri@o2.cz")
+            password = st.text_input("Heslo", type="password")
+            submitted = st.form_submit_button("Přihlásit se", type="primary", use_container_width=True)  # ✅
+
+        if submitted:
+            if not cooldown_ok("login_submit_ts", seconds=3):
+                st.warning("Počkej chvilku a zkus to znovu.")
+                st.stop()
+
+            if not email or not password:
+                st.error("Vyplň email i heslo.")
+            else:
+                try:
+                    auth = supabase.auth.sign_in_with_password(
+                        {"email": email.strip(), "password": password}
+                    )
+                    set_logged_in_session(auth)
+                    try_ensure_profile_row(st.session_state["user"]["id"], st.session_state["user"]["email"])
+                    st.success("✅ Přihlášeno.")
+                    st.switch_page("pages/2_Zapasy.py")  # ✅ hned na zápasy
+                except Exception as e:
+                    st.error(f"Chyba při přihlášení: {e}")
+
+
+# ================
+# REGISTER
+# ================
+with tab_register:
+    with card("🆕 Registrace", "Po registraci se nevyžaduje potvrzení mailem."):
+        with st.form("register_form", clear_on_submit=False):
+            reg_email = st.text_input("Email", placeholder="např. miloslav.tlapa@o2.cz")
+            reg_password = st.text_input("Heslo", type="password")
+            reg_password2 = st.text_input("Potvrzení hesla", type="password")
+            submitted_reg = st.form_submit_button("Zaregistrovat se", type="primary", use_container_width=True)  # ✅
+
+        if submitted_reg:
+            if not cooldown_ok("register_submit_ts", seconds=15):
+                st.warning("Registrace už byla odeslaná – počkej 15s a zkus to znovu.")
+                st.stop()
+
+            if not reg_email or not reg_password or not reg_password2:
+                st.error("Vyplň email a obě hesla.")
+            elif reg_password != reg_password2:
+                st.error("Hesla se neshodují.")
+            elif len(reg_password) < 6:
+                st.error("Heslo musí mít alespoň 6 znaků.")
+            else:
+                try:
+                    supabase.auth.sign_up({"email": reg_email.strip(), "password": reg_password})
+                    st.success("✅ Registrace odeslána. Můžeš se přihlásit do tipovačky).")
+                    st.info("Není potřeba potvrzovat nic v mailu")
+                except Exception as e:
+                    st.error(f"Chyba při registraci: {e}")
