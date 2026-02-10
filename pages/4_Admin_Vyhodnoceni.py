@@ -134,6 +134,27 @@ render_hero(
 )
 
 # =====================
+# Admin box s odkazy
+# =====================
+with card("🛠️ Admin odkazy"):
+    c1, c2, c3, c4, c5 = st.columns(5)
+    with c1:
+        if st.button("🧾 Soupisky", type="secondary", use_container_width=True):
+            st.switch_page("pages/1_Soupisky_Admin.py")
+    with c2:
+        if st.button("✏️ Manuální body", type="primary", use_container_width=True):
+            st.switch_page("pages/8_Admin_Manualni_Body.py")
+    with c3:
+        if st.button("🏅 Umístění", type="secondary", use_container_width=True):
+            st.switch_page("pages/7_Admin_Umisteni.py")
+    with c4:
+        if st.button("🔍 Diagnostika", type="secondary", use_container_width=True):
+            st.switch_page("pages/6_Admin_Diagnostika_RLS.py")
+    with c5:
+        if st.button("🔄 Sync bodů", type="secondary", use_container_width=True):
+            st.switch_page("pages/5_Admin_Sync_Points.py")
+
+# =====================
 # Load matches
 # =====================
 try:
