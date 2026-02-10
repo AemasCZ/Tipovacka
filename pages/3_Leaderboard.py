@@ -38,9 +38,9 @@ if not user:
         st.warning("Nejsi přihlášený.")
         if st.button("➡️ Přihlášení", type="primary"):
             st.switch_page("app.py")
-    st.stop()
+        st.stop()
 
-# --- profily ---
+# --- načti profily ---
 try:
     prof_res = supabase.table("profiles").select("user_id, email, is_admin, points").execute()
     profiles = prof_res.data or []
@@ -51,7 +51,7 @@ except Exception as e:
 if not profiles:
     with card("ℹ️ Info"):
         st.info("Zatím nejsou žádní uživatelé v profiles.")
-    st.stop()
+        st.stop()
 
 email_by_uid = {p["user_id"]: (p.get("email") or "—") for p in profiles}
 uids = list(email_by_uid.keys())
@@ -88,6 +88,7 @@ for p in profiles:
     calculated = match_points.get(uid, 0) + placement_points.get(uid, 0)
     manual_points[uid] = total_from_db - calculated
 
+# --- sestavení řádků ---
 rows = []
 for p in profiles:
     uid = p["user_id"]
@@ -100,6 +101,7 @@ for p in profiles:
         "_is_admin": bool(p.get("is_admin")),
     })
 
+# Seřazení podle bodů (nejvíce bodů nahoře)
 rows.sort(key=lambda x: (-x["Body"], x["Uživatel"]))
 
 # Admin box
@@ -134,7 +136,7 @@ with card("🏆 Pořadí"):
                 label = f"{label} 🥈"
             elif i == 3:
                 label = f"{label} 🥉"
-            
+
             table_rows.append({
                 "#": i,
                 "Uživatel": label,
@@ -143,35 +145,36 @@ with card("🏆 Pořadí"):
                 "Manuální": r["Manuální"],
                 "Body": r["Body"]
             })
-        
+
         st.dataframe(table_rows, use_container_width=True, hide_index=True)
-        
-        # Vysvětlivka pro admina
-        with st.expander("ℹ️ Co znamenají sloupce"):
-            st.markdown("""
-            - **Zápasy**: Body z tipování výsledků a střelců
-            - **Umístění**: Body z tipování umístění na medailích
-            - **Manuální**: Ručně přidané/odebrané body adminem
-            - **Body**: Celkový součet (= Zápasy + Umístění + Manuální)
-            
-            💡 *Běžní uživatelé vidí jen celkové body bez rozkladu.*
-            """)
     else:
         # Běžní uživatelé vidí jen celkové body
         table_rows = []
         for i, r in enumerate(rows, start=1):
             label = r["Uživatel"]
             if i == 1:
-                label = f"{label} 🥇"
+                label = f"🥇 {label}"
             elif i == 2:
-                label = f"{label} 🥈"
+                label = f"🥈 {label}"
             elif i == 3:
-                label = f"{label} 🥉"
-            
+                label = f"🥉 {label}"
+
             table_rows.append({
                 "#": i,
                 "Uživatel": label,
                 "Body": r["Body"]
             })
-        
+
         st.dataframe(table_rows, use_container_width=True, hide_index=True)
+
+# Vysvětlivka pro admina
+if is_admin:
+    with st.expander("ℹ️ Co znamenají sloupce"):
+        st.markdown("""
+        - **Zápasy**: Body z tipování výsledků a střelců
+        - **Umístění**: Body z tipování umístění na medailích
+        - **Manuální**: Ručně přidané/odebrané body adminem
+        - **Body**: Celkový součet (= Zápasy + Umístění + Manuální)
+
+        💡 *Běžní uživatelé vidí jen celkové body bez rozkladu.*
+        """)
