@@ -18,7 +18,7 @@ if not SUPABASE_URL or not SUPABASE_ANON_KEY:
 
 supabase = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
-# Session nastavení pro RLS (Row Level Security - zabezpečení na úrovni řádků)
+# Session nastavení pro RLS
 if st.session_state.get("access_token") and st.session_state.get("refresh_token"):
     supabase.auth.set_session(st.session_state["access_token"], st.session_state["refresh_token"])
 
@@ -33,11 +33,11 @@ render_top_menu(user, supabase=supabase, user_id=user_id)
 # Hero sekce
 render_hero(
     "Admin – Manuální body",
-    "Přidej nebo odeber body uživatelům ručně. Body se připočítají k celkovému skóre.",
+    "Přidej nebo odeber body uživatelům ručně. Body se ukládají do manual_points_log a aktualizují profiles.points.",
     image_path="assets/olymp.png",
 )
 
-# Kontrola přihlášení
+# Kontroly přihlášení
 if not user:
     with card("🔐 Nepřihlášen"):
         st.warning("Nejsi přihlášený.")
@@ -55,7 +55,7 @@ except Exception as e:
     st.error(f"Nelze ověřit admina: {e}")
     st.stop()
 
-# Načti uživatele z databáze
+# Načti uživatele
 try:
     profiles = (supabase.table("profiles").select("user_id, email, points").execute().data or [])
 except Exception as e:
@@ -73,18 +73,30 @@ with card("✏️ Přidej/odeber body"):
         
         selected_user = profiles[selected_idx]
         
-        # Input pro body
+        # Inputy
         points_to_add = st.number_input("Body k přidání/odebrání", value=0, step=1, 
                                        help="Kladné číslo přidá body, záporné odebere")
         reason = st.text_input("Důvod (volitelné)", placeholder="např. bonus za aktivitu")
         
-        # Tlačítko pro uložení
+        # Uložení
         if st.button("💾 Uložit změnu", type="primary", disabled=(points_to_add == 0)):
             try:
                 current_points = int(selected_user.get("points", 0))
-                new_points = max(0, current_points + int(points_to_add))  # Nesmí klesnout pod 0
+                new_points = max(0, current_points + int(points_to_add))
                 
-                # Aktualizace v databázi
+                # 1. Vlož záznam do manual_points_log
+                log_entry = {
+                    "admin_user_id": user_id,
+                    "target_user_id": selected_user["user_id"],
+                    "change_amount": int(points_to_add),
+                    "old_points": current_points,
+                    "new_points": new_points,
+                    "reason": reason.strip() if reason.strip() else None
+                }
+                
+                supabase.table("manual_points_log").insert(log_entry).execute()
+                
+                # 2. Aktualizuj profiles.points
                 supabase.table("profiles").update(
                     {"points": new_points}
                 ).eq("user_id", selected_user["user_id"]).execute()
@@ -95,20 +107,56 @@ with card("✏️ Přidej/odeber body"):
                 if reason:
                     st.info(f"Důvod: {reason}")
                 
-                # Obnovení stránky pro aktuální data
                 st.rerun()
                 
             except Exception as e:
                 st.error(f"Chyba při ukládání: {e}")
                 st.code(str(e))  # Pro debugging
 
+# Přehled změn
+with card("📋 Historie manuálních změn"):
+    try:
+        # Načti historii s joinem na emaily
+        logs = supabase.table("manual_points_log").select(
+            "created_at, change_amount, old_points, new_points, reason, admin_user_id, target_user_id"
+        ).order("created_at", desc=True).limit(20).execute().data or []
+        
+        if logs:
+            # Získej emaily pro admin_user_id a target_user_id
+            user_ids = set()
+            for log in logs:
+                user_ids.add(log["admin_user_id"])
+                user_ids.add(log["target_user_id"])
+            
+            emails_res = supabase.table("profiles").select("user_id, email").in_("user_id", list(user_ids)).execute().data or []
+            emails_map = {p["user_id"]: p["email"] for p in emails_res}
+            
+            # Zobraz tabulku
+            table_data = []
+            for log in logs:
+                admin_email = emails_map.get(log["admin_user_id"], "—")
+                target_email = emails_map.get(log["target_user_id"], "—")
+                
+                table_data.append({
+                    "Datum": log["created_at"][:16] if log["created_at"] else "—",
+                    "Admin": admin_email,
+                    "Uživatel": target_email,
+                    "Změna": f"{log['change_amount']:+d}",
+                    "Body": f"{log['old_points']} → {log['new_points']}",
+                    "Důvod": log["reason"] or "—"
+                })
+            
+            st.dataframe(table_data, use_container_width=True, hide_index=True)
+        else:
+            st.caption("Zatím žádné manuální změny.")
+    except Exception as e:
+        st.error(f"Nelze načíst historii: {e}")
+
 # Přehled všech uživatelů
-with card("👥 Přehled všech uživatelů"):
+with card("👥 Aktuální stav bodů"):
     if profiles:
-        # Seřazení podle bodů (nejvíce bodů nahoře)
         sorted_profiles = sorted(profiles, key=lambda x: -int(x.get("points", 0)))
         
-        # Zobrazení tabulky
         table_data = []
         for i, p in enumerate(sorted_profiles, 1):
             medal = ""
