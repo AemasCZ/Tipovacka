@@ -18,7 +18,7 @@ if not SUPABASE_URL or not SUPABASE_ANON_KEY:
 
 supabase = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
-# Session nastavení pro RLS
+# Session nastavení pro RLS (Row Level Security)
 if st.session_state.get("access_token") and st.session_state.get("refresh_token"):
     supabase.auth.set_session(st.session_state["access_token"], st.session_state["refresh_token"])
 
