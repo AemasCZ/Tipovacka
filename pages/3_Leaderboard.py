@@ -167,17 +167,19 @@ with card("🏆 Pořadí"):
         elif i == 3:
             email_display = f"🥉 {email_display}"
 
+        # ✅ PRO VŠECHNY (admin i neadmin) = profiles.points
         base = {
             "#": i,
             "Uživatel": email_display,
-            "Body": r["total"],  # ✅ vždy správné i pro neadmina
+            "Body celkem": r["total"],  # ✅ profiles.points = zápasy + umístění + manuální
         }
 
+        # ✅ ADMIN vidí navíc rozpad pro kontrolu
         if is_admin:
             uid = r["user_id"]
-            base["Zápasy"] = int(match_sum.get(uid, 0))
-            base["Umístění"] = int(place_sum.get(uid, 0))
-            base["Manuální"] = int(manual_sum.get(uid, 0))
+            base["└─ Zápasy"] = int(match_sum.get(uid, 0))
+            base["└─ Umístění"] = int(place_sum.get(uid, 0))
+            base["└─ Manuální"] = int(manual_sum.get(uid, 0))
 
         table_rows.append(base)
 
