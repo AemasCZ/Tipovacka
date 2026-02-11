@@ -447,10 +447,10 @@ def score_points(pred_h, pred_a, final_h, final_a):
         "scorer": 0,
     }
 
-    # ✅ přesný výsledek = 3 body (dle tvého požadavku)
+    # ✅ přesný výsledek = 6 body (dle tvého požadavku)
     if pred_h == final_h and pred_a == final_a:
         points += 3
-        detail["exact_score"] = 3
+        detail["exact_score"] = 6
         return points, detail
 
     pred_diff = pred_h - pred_a
