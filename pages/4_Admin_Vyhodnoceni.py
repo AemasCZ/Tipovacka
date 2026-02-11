@@ -1,4 +1,4 @@
-# 4_Admin_Vyhodnoceni.py
+# pages/4_Admin_Vyhodnoceni.py
 import os
 from datetime import datetime, timezone
 
@@ -9,6 +9,7 @@ from supabase import create_client
 
 from ui_layout import apply_o2_style, render_hero, card
 from ui_menu import render_top_menu
+
 
 # =====================
 # BODY – jednotný výpočet (zápasy + umístění + manuální)
@@ -74,8 +75,6 @@ def recompute_profiles_points(supabase, user_ids: list[str]):
     except Exception:
         pass
 
-    # --- zapiš do profiles ---
-    # (záměrně to neshazuje celé, ale když failne update, aspoň to ukážeme adminovi)
     errors = []
     for uid in user_ids:
         total = int(match_sum.get(uid, 0)) + int(place_sum.get(uid, 0)) + int(manual_sum.get(uid, 0))
@@ -103,7 +102,6 @@ apply_o2_style()
 st.markdown(
     """
     <style>
-      /* Selectbox (BaseWeb Select) – ať není tmavý */
       [data-baseweb="select"] > div{
         background: #fff !important;
         border: 1px solid rgba(11,18,32,.12) !important;
@@ -119,7 +117,6 @@ st.markdown(
         box-shadow: 0 0 0 4px rgba(27,76,255,.14) !important;
       }
 
-      /* Expander – ať vypadá jako O2 card */
       [data-testid="stExpander"]{
         border: 1px solid rgba(11,18,32,.10) !important;
         border-radius: 16px !important;
@@ -137,7 +134,6 @@ st.markdown(
         background: rgba(27,76,255,.06) !important;
       }
 
-      /* Dataframe – lehce uhladit */
       [data-testid="stDataFrame"]{
         border-radius: 16px !important;
         overflow: hidden !important;
@@ -254,11 +250,13 @@ if not matches:
     st.info("V databázi nejsou žádné zápasy.")
     st.stop()
 
+
 def match_label(m: dict) -> str:
     fin_h = m.get("final_home_score")
     fin_a = m.get("final_away_score")
     res = f"{fin_h}:{fin_a}" if fin_h is not None and fin_a is not None else "—"
     return f"{m['home_team']} vs {m['away_team']} | výsledek: {res} | {m.get('starts_at','')}"
+
 
 match_map = {match_label(m): m for m in matches}
 
@@ -435,6 +433,7 @@ with card("🧾 Náhled bodů", "Kontrola: jak se body počítají pro jednotliv
             )
         st.dataframe(pd.DataFrame(rows), use_container_width=True)
 
+
 # =====================
 # HELPERS
 # =====================
@@ -448,6 +447,7 @@ def score_points(pred_h, pred_a, final_h, final_a):
         "scorer": 0,
     }
 
+    # přesný výsledek
     if pred_h == final_h and pred_a == final_a:
         points += 6
         detail["exact_score"] = 6
@@ -458,24 +458,30 @@ def score_points(pred_h, pred_a, final_h, final_a):
     pred_winner = 1 if pred_diff > 0 else (-1 if pred_diff < 0 else 0)
     final_winner = 1 if final_diff > 0 else (-1 if final_diff < 0 else 0)
 
+    # správný vítěz + rozdíl
     if pred_winner == final_winner and pred_diff == final_diff:
         points += 4
         detail["winner_and_diff"] = 4
+    # správný vítěz (ne remíza)
     elif pred_winner == final_winner and pred_winner != 0:
         points += 2
         detail["winner_only"] = 2
 
+    # góly aspoň jednoho týmu přesně
     if pred_h == final_h or pred_a == final_a:
         points += 1
         detail["one_team_goals"] = 1
 
     return points, detail
 
+
 def scorer_point_for_prediction(pred: dict, did_score_map: dict) -> int:
+    """✅ střelec je za 5 bodů"""
     pid = pred.get("scorer_player_id")
     if not pid:
         return 0
-    return 1 if did_score_map.get(pid) else 0
+    return 5 if did_score_map.get(pid) else 0
+
 
 # =====================
 # ACTIONS
@@ -491,64 +497,82 @@ with card("⚙️ Akce", "Spusť přepočet bodů nebo smaž hodnocení zápasu.
 # Přepočet bodů
 # =====================
 if do_recalc:
-    if m.get("final_home_score") is None or m.get("final_away_score") is None:
-        st.error("Nejdřív nastav výsledek zápasu.")
-    else:
-        try:
-            sr_res2 = (
-                supabase.table("scorer_results")
-                .select("scorer_player_id, did_score")
-                .eq("match_id", match_id)
-                .execute()
+    try:
+        # 1) natáhni ČERSTVÝ výsledek zápasu z DB
+        match_row = (
+            supabase.table("matches")
+            .select("final_home_score, final_away_score")
+            .eq("id", match_id)
+            .single()
+            .execute()
+            .data
+            or {}
+        )
+        if match_row.get("final_home_score") is None or match_row.get("final_away_score") is None:
+            st.error("Nejdřív nastav výsledek zápasu.")
+            st.stop()
+
+        final_h = int(match_row.get("final_home_score") or 0)
+        final_a = int(match_row.get("final_away_score") or 0)
+
+        # 2) načti rozhodnutí střelců
+        sr_res2 = (
+            supabase.table("scorer_results")
+            .select("scorer_player_id, did_score")
+            .eq("match_id", match_id)
+            .execute()
+        )
+        did_score_map = {
+            r["scorer_player_id"]: bool(r.get("did_score"))
+            for r in (sr_res2.data or [])
+            if r.get("scorer_player_id") is not None
+        }
+
+        # 3) přepočti body pro každý tip
+        updates = []
+        for p in preds:
+            ph = int(p.get("home_score") or 0)
+            pa = int(p.get("away_score") or 0)
+
+            sp, detail = score_points(ph, pa, final_h, final_a)
+
+            # ✅ +5 bodů za správného střelce
+            sp += scorer_point_for_prediction(p, did_score_map)
+            if p.get("scorer_player_id") and did_score_map.get(p["scorer_player_id"]):
+                detail["scorer"] = 5
+
+            updates.append(
+                {
+                    "user_id": p["user_id"],
+                    "match_id": p["match_id"],
+                    "points_awarded": int(sp),
+                    "points_detail": detail,
+                }
             )
-            did_score_map = {r["scorer_player_id"]: bool(r.get("did_score")) for r in (sr_res2.data or [])}
 
-            final_h = int(m.get("final_home_score") or 0)
-            final_a = int(m.get("final_away_score") or 0)
+        # 4) ✅ FIX: update jen bodů + detailu (NE upsert)
+        for u in updates:
+            supabase.table("predictions").update(
+                {
+                    "points_awarded": u["points_awarded"],
+                    "points_detail": u["points_detail"],
+                }
+            ).eq("user_id", u["user_id"]).eq("match_id", u["match_id"]).execute()
 
-            updates = []
-            for p in preds:
-                ph = int(p.get("home_score") or 0)
-                pa = int(p.get("away_score") or 0)
+        # 5) označ zápas jako vyhodnocený
+        supabase.table("matches").update(
+            {"evaluated_at": datetime.now(timezone.utc).isoformat()}
+        ).eq("id", match_id).execute()
 
-                sp, detail = score_points(ph, pa, final_h, final_a)
-                sp += scorer_point_for_prediction(p, did_score_map)
+        # 6) přepočti profiles.points (leaderboard celkem)
+        uids = list({p["user_id"] for p in preds if p.get("user_id")})
+        recompute_profiles_points(supabase, uids)
 
-                if p.get("scorer_player_id") and did_score_map.get(p["scorer_player_id"]):
-                    detail["scorer"] = 5
+        st.success("✅ Body přepočítány a uloženy.")
+        st.rerun()
 
-                updates.append(
-                    {
-                        "user_id": p["user_id"],
-                        "match_id": p["match_id"],
-                        "points_awarded": int(sp),
-                        "points_detail": detail,
-                    }
-                )
-
-            # ✅ FIX: NE upsert (ten rozbíjí NOT NULL home_score/away_score)
-            # ✅ Správně: update jen bodů + detailu
-            for u in updates:
-                supabase.table("predictions").update(
-                    {
-                        "points_awarded": u["points_awarded"],
-                        "points_detail": u["points_detail"],
-                    }
-                ).eq("user_id", u["user_id"]).eq("match_id", u["match_id"]).execute()
-
-            supabase.table("matches").update(
-                {"evaluated_at": datetime.now(timezone.utc).isoformat()}
-            ).eq("id", match_id).execute()
-
-            # ✅ jednotný přepočet leaderboard bodů (zápasy + umístění + manuální)
-            uids = list({p["user_id"] for p in preds if p.get("user_id")})
-            recompute_profiles_points(supabase, uids)
-
-            st.success("✅ Body přepočítány a uloženy.")
-            st.rerun()
-
-        except Exception as e:
-            st.error(f"Chyba při přepočtu: {e}")
+    except Exception as e:
+        st.error(f"Chyba při přepočtu: {e}")
 
 # =====================
 # Mazání hodnocení
@@ -574,7 +598,6 @@ if do_delete_eval:
 
                 supabase.table("scorer_results").delete().eq("match_id", match_id).execute()
 
-                # ✅ jednotný přepočet leaderboard bodů
                 recompute_profiles_points(supabase, affected_uids)
 
                 supabase.table("matches").update(
