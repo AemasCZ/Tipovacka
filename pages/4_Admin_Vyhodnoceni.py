@@ -449,7 +449,7 @@ def score_points(pred_h, pred_a, final_h, final_a):
 
     # ✅ přesný výsledek = 6 body (dle tvého požadavku)
     if pred_h == final_h and pred_a == final_a:
-        points += 3
+        points += 6
         detail["exact_score"] = 6
         return points, detail
 
