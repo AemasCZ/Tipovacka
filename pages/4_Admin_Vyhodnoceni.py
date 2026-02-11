@@ -447,10 +447,10 @@ def score_points(pred_h, pred_a, final_h, final_a):
         "scorer": 0,
     }
 
-    # přesný výsledek
+    # ✅ přesný výsledek = 3 body (dle tvého požadavku)
     if pred_h == final_h and pred_a == final_a:
-        points += 6
-        detail["exact_score"] = 6
+        points += 3
+        detail["exact_score"] = 3
         return points, detail
 
     pred_diff = pred_h - pred_a
@@ -458,16 +458,17 @@ def score_points(pred_h, pred_a, final_h, final_a):
     pred_winner = 1 if pred_diff > 0 else (-1 if pred_diff < 0 else 0)
     final_winner = 1 if final_diff > 0 else (-1 if final_diff < 0 else 0)
 
-    # správný vítěz + rozdíl
+    # správný vítěz + správný brankový rozdíl = 4 body
     if pred_winner == final_winner and pred_diff == final_diff:
         points += 4
         detail["winner_and_diff"] = 4
-    # správný vítěz (ne remíza)
-    elif pred_winner == final_winner and pred_winner != 0:
-        points += 2
-        detail["winner_only"] = 2
 
-    # góly aspoň jednoho týmu přesně
+    # ✅ správně určený vítěz = 3 body (u tebe bylo 2, to bylo špatně)
+    elif pred_winner == final_winner and pred_winner != 0:
+        points += 3
+        detail["winner_only"] = 3
+
+    # trefený počet gólů jednoho týmu = 1 bod
     if pred_h == final_h or pred_a == final_a:
         points += 1
         detail["one_team_goals"] = 1
