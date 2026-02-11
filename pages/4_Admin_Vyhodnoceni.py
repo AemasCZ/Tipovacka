@@ -75,14 +75,21 @@ def recompute_profiles_points(supabase, user_ids: list[str]):
         pass
 
     # --- zapiš do profiles ---
+    # (záměrně to neshazuje celé, ale když failne update, aspoň to ukážeme adminovi)
+    errors = []
     for uid in user_ids:
         total = int(match_sum.get(uid, 0)) + int(place_sum.get(uid, 0)) + int(manual_sum.get(uid, 0))
         if total < 0:
             total = 0
         try:
             supabase.table("profiles").update({"points": total}).eq("user_id", uid).execute()
-        except Exception:
-            pass
+        except Exception as e:
+            errors.append(f"{uid}: {e}")
+
+    if errors:
+        st.error("Některé updates do profiles selhaly (RLS/permissions):")
+        st.code("\n".join(errors))
+
 
 # =====================
 # Nastavení stránky
@@ -519,8 +526,15 @@ if do_recalc:
                     }
                 )
 
-            if updates:
-                supabase.table("predictions").upsert(updates).execute()
+            # ✅ FIX: NE upsert (ten rozbíjí NOT NULL home_score/away_score)
+            # ✅ Správně: update jen bodů + detailu
+            for u in updates:
+                supabase.table("predictions").update(
+                    {
+                        "points_awarded": u["points_awarded"],
+                        "points_detail": u["points_detail"],
+                    }
+                ).eq("user_id", u["user_id"]).eq("match_id", u["match_id"]).execute()
 
             supabase.table("matches").update(
                 {"evaluated_at": datetime.now(timezone.utc).isoformat()}
