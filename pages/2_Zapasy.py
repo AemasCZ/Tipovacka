@@ -2,6 +2,7 @@
 import os
 import re
 from datetime import datetime, timezone, date
+from zoneinfo import ZoneInfo
 
 import streamlit as st
 from supabase import create_client
@@ -49,13 +50,54 @@ if not st.session_state.get("access_token") or not st.session_state.get("refresh
     st.error("Chybí session tokeny. Odhlas se a přihlas znovu.")
     st.stop()
 
-# ----- Helpers -----
-def parse_dt(x: str):
-    try:
-        return datetime.fromisoformat(x.replace("Z", "+00:00"))
-    except Exception:
-        return None
+# =========================
+# TIMEZONE / LOCK FIX
+# =========================
+LOCAL_TZ = ZoneInfo("Europe/Prague")
 
+def parse_match_dt(starts_at_value: str):
+    """
+    Vrací tuple (dt_utc, dt_local) jako timezone-aware datetime.
+    OPRAVA PRO TVOU DB:
+      - v DB máš timestamptz a hodnoty typu 2026-02-11 16:40:00+00
+      - ty to ale myslíš jako 16:40 v Praze
+      - takže když přijde offset +00, bereme ten "wall time" jako Europe/Prague,
+        a teprve pak převádíme do UTC.
+    """
+    try:
+        if not starts_at_value:
+            return None, None
+
+        s = starts_at_value.strip()
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+
+        if dt.tzinfo is None:
+            # kdyby někdy přišlo bez TZ, bereme jako lokální Praha
+            dt_local = dt.replace(tzinfo=LOCAL_TZ)
+            return dt_local.astimezone(timezone.utc), dt_local
+
+        # když je to +00 (UTC), ale my víme, že je to "lokální čas uložený jako UTC"
+        off = dt.utcoffset()
+        if off is not None and off.total_seconds() == 0:
+            dt_local = dt.replace(tzinfo=LOCAL_TZ)  # zachovej hodiny/minuty, změň TZ interpretaci
+            return dt_local.astimezone(timezone.utc), dt_local
+
+        # jinak to bereme jako validní timezone-aware čas
+        dt_utc = dt.astimezone(timezone.utc)
+        dt_local = dt_utc.astimezone(LOCAL_TZ)
+        return dt_utc, dt_local
+
+    except Exception:
+        return None, None
+
+now_utc = datetime.now(timezone.utc)
+now_local = now_utc.astimezone(LOCAL_TZ)
+today = now_local.date()
+
+def day_label(d: date):
+    return d.strftime("%d.%m.%Y")
+
+# ----- Helpers -----
 def iso2_flag(iso2: str) -> str:
     if not iso2 or len(iso2) != 2:
         return "🏳️"
@@ -133,12 +175,6 @@ def club_country_flag(country3: str | None) -> str:
     iso2 = COUNTRY3_TO_ISO2.get(country3.upper())
     return iso2_flag(iso2) if iso2 else "🏳️"
 
-now = datetime.now(timezone.utc)
-today = now.date()
-
-def day_label(d: date):
-    return d.strftime("%d.%m.%Y")
-
 # ----- DB: matches -----
 matches_res = (
     supabase.table("matches")
@@ -173,13 +209,15 @@ def load_my_predictions():
 preds = load_my_predictions()
 pred_by_match = {p["match_id"]: p for p in preds}
 
+# seskupení po dnech (podle Prahy)
 by_day = {}
 for m in matches:
-    dt = parse_dt(m["starts_at"])
-    if not dt:
+    dt_utc, dt_local = parse_match_dt(m.get("starts_at"))
+    if not dt_utc or not dt_local:
         continue
-    m["_dt"] = dt
-    d = dt.date()
+    m["_dt_utc"] = dt_utc
+    m["_dt_local"] = dt_local
+    d = dt_local.date()
     by_day.setdefault(d, []).append(m)
 
 days_sorted = sorted(by_day.keys())
@@ -293,9 +331,10 @@ def render_scorers_section(match_id: str, home_team: str, away_team: str, match_
 
 def match_card(m: dict):
     match_id = m["id"]
-    dt = m["_dt"]
-    match_day = dt.date()
-    time_str = dt.strftime("%H:%M")
+    dt_utc = m["_dt_utc"]
+    dt_local = m["_dt_local"]
+    match_day = dt_local.date()
+    time_str = dt_local.strftime("%H:%M")
 
     p = pred_by_match.get(match_id, {})
     has_tip = match_id in pred_by_match
@@ -314,7 +353,8 @@ def match_card(m: dict):
         else:
             st.markdown("**Střelec:** —")
 
-        if dt <= now:
+        # ✅ LOCK podle UTC (správně)
+        if dt_utc <= now_utc:
             st.info("Zápas už začal / proběhl – tip nelze měnit.")
             return
 
