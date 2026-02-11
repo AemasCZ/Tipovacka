@@ -515,7 +515,7 @@ if do_recalc:
                 sp += scorer_point_for_prediction(p, did_score_map)
 
                 if p.get("scorer_player_id") and did_score_map.get(p["scorer_player_id"]):
-                    detail["scorer"] = 1
+                    detail["scorer"] = 5
 
                 updates.append(
                     {
