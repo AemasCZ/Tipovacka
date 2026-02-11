@@ -11,6 +11,80 @@ from ui_layout import apply_o2_style, render_hero, card
 from ui_menu import render_top_menu
 
 # =====================
+# BODY – jednotný výpočet (zápasy + umístění + manuální)
+# =====================
+def recompute_profiles_points(supabase, user_ids: list[str]):
+    """Přepíše profiles.points pro dané uživatele podle:
+    predictions.points_awarded + placement_predictions.points_awarded + sum(manual_points_log.change_amount).
+    """
+    if not user_ids:
+        return
+
+    # --- zápasy ---
+    match_sum: dict[str, int] = {uid: 0 for uid in user_ids}
+    try:
+        preds = (
+            supabase.table("predictions")
+            .select("user_id, points_awarded")
+            .in_("user_id", user_ids)
+            .execute()
+            .data
+            or []
+        )
+        for r in preds:
+            uid = r.get("user_id")
+            if uid in match_sum:
+                match_sum[uid] += int(r.get("points_awarded") or 0)
+    except Exception:
+        pass
+
+    # --- umístění ---
+    place_sum: dict[str, int] = {uid: 0 for uid in user_ids}
+    try:
+        pp = (
+            supabase.table("placement_predictions")
+            .select("user_id, points_awarded")
+            .in_("user_id", user_ids)
+            .execute()
+            .data
+            or []
+        )
+        for r in pp:
+            uid = r.get("user_id")
+            if uid in place_sum:
+                place_sum[uid] += int(r.get("points_awarded") or 0)
+    except Exception:
+        pass
+
+    # --- manuální ---
+    manual_sum: dict[str, int] = {uid: 0 for uid in user_ids}
+    try:
+        logs = (
+            supabase.table("manual_points_log")
+            .select("target_user_id, change_amount")
+            .in_("target_user_id", user_ids)
+            .execute()
+            .data
+            or []
+        )
+        for r in logs:
+            uid = r.get("target_user_id")
+            if uid in manual_sum:
+                manual_sum[uid] += int(r.get("change_amount") or 0)
+    except Exception:
+        pass
+
+    # --- zapiš do profiles ---
+    for uid in user_ids:
+        total = int(match_sum.get(uid, 0)) + int(place_sum.get(uid, 0)) + int(manual_sum.get(uid, 0))
+        if total < 0:
+            total = 0
+        try:
+            supabase.table("profiles").update({"points": total}).eq("user_id", uid).execute()
+        except Exception:
+            pass
+
+# =====================
 # Nastavení stránky
 # =====================
 load_dotenv()
@@ -139,19 +213,19 @@ render_hero(
 with card("🛠️ Admin odkazy"):
     c1, c2, c3, c4, c5 = st.columns(5)
     with c1:
-        if st.button("🧾 Soupisky", type="secondary", use_container_width=True):
+        if st.button("🧾 Soupisky", type="secondary", use_container_width=True, key="admin_links_soupisky"):
             st.switch_page("pages/1_Soupisky_Admin.py")
     with c2:
-        if st.button("✏️ Manuální body", type="primary", use_container_width=True):
+        if st.button("✏️ Manuální body", type="primary", use_container_width=True, key="admin_links_manual"):
             st.switch_page("pages/8_Admin_Manualni_Body.py")
     with c3:
-        if st.button("🏅 Umístění", type="secondary", use_container_width=True):
+        if st.button("🏅 Umístění", type="secondary", use_container_width=True, key="admin_links_umisteni"):
             st.switch_page("pages/7_Admin_Umisteni.py")
     with c4:
-        if st.button("🔍 Diagnostika", type="secondary", use_container_width=True):
+        if st.button("🔍 Diagnostika", type="secondary", use_container_width=True, key="admin_links_diag"):
             st.switch_page("pages/6_Admin_Diagnostika_RLS.py")
     with c5:
-        if st.button("🔄 Sync bodů", type="secondary", use_container_width=True):
+        if st.button("🔄 Sync bodů", type="secondary", use_container_width=True, key="admin_links_sync"):
             st.switch_page("pages/5_Admin_Sync_Points.py")
 
 # =====================
@@ -173,13 +247,11 @@ if not matches:
     st.info("V databázi nejsou žádné zápasy.")
     st.stop()
 
-
 def match_label(m: dict) -> str:
     fin_h = m.get("final_home_score")
     fin_a = m.get("final_away_score")
     res = f"{fin_h}:{fin_a}" if fin_h is not None and fin_a is not None else "—"
     return f"{m['home_team']} vs {m['away_team']} | výsledek: {res} | {m.get('starts_at','')}"
-
 
 match_map = {match_label(m): m for m in matches}
 
@@ -223,7 +295,6 @@ if preds:
 # =====================
 # Load scorer decisions (scorer_results) for match
 # =====================
-# ✅ OPRAVA: scorer_results má sloupec scorer_player_id (ne player_id)
 try:
     sr_res = (
         supabase.table("scorer_results")
@@ -327,7 +398,7 @@ with card("⚽ Tipovaní střelci", "U každého střelce rozhodni, jestli dal g
                     try:
                         payload = {
                             "match_id": match_id,
-                            "scorer_player_id": pid,  # ✅ OPRAVA
+                            "scorer_player_id": pid,
                             "scorer_name": info["scorer_name"],
                             "scorer_team": info["scorer_team"],
                             "did_score": bool(did_score),
@@ -393,13 +464,11 @@ def score_points(pred_h, pred_a, final_h, final_a):
 
     return points, detail
 
-
 def scorer_point_for_prediction(pred: dict, did_score_map: dict) -> int:
     pid = pred.get("scorer_player_id")
     if not pid:
         return 0
     return 1 if did_score_map.get(pid) else 0
-
 
 # =====================
 # ACTIONS
@@ -419,7 +488,6 @@ if do_recalc:
         st.error("Nejdřív nastav výsledek zápasu.")
     else:
         try:
-            # ✅ OPRAVA: scorer_player_id
             sr_res2 = (
                 supabase.table("scorer_results")
                 .select("scorer_player_id, did_score")
@@ -458,16 +526,9 @@ if do_recalc:
                 {"evaluated_at": datetime.now(timezone.utc).isoformat()}
             ).eq("id", match_id).execute()
 
+            # ✅ jednotný přepočet leaderboard bodů (zápasy + umístění + manuální)
             uids = list({p["user_id"] for p in preds if p.get("user_id")})
-            for uid in uids:
-                r = (
-                    supabase.table("predictions")
-                    .select("points_awarded")
-                    .eq("user_id", uid)
-                    .execute()
-                ).data or []
-                total = sum(int(x.get("points_awarded") or 0) for x in r)
-                supabase.table("profiles").update({"points": int(total)}).eq("user_id", uid).execute()
+            recompute_profiles_points(supabase, uids)
 
             st.success("✅ Body přepočítány a uloženy.")
             st.rerun()
@@ -486,39 +547,21 @@ if do_delete_eval:
             try:
                 preds_before = (
                     supabase.table("predictions")
-                    .select("user_id, points_awarded")
+                    .select("user_id")
                     .eq("match_id", match_id)
                     .execute()
                 ).data or []
 
-                delta_by_user = {}
-                for p in preds_before:
-                    uid = p["user_id"]
-                    delta_by_user[uid] = delta_by_user.get(uid, 0) - int(p.get("points_awarded") or 0)
+                affected_uids = list({p.get("user_id") for p in preds_before if p.get("user_id")})
 
                 supabase.table("predictions").update(
                     {"points_awarded": 0, "points_detail": None}
                 ).eq("match_id", match_id).execute()
 
-                # (tady je to OK — jen smažeme řádky pro match)
                 supabase.table("scorer_results").delete().eq("match_id", match_id).execute()
 
-                if delta_by_user:
-                    uids = list(delta_by_user.keys())
-                    profs = (
-                        supabase.table("profiles")
-                        .select("user_id, points")
-                        .in_("user_id", uids)
-                        .execute()
-                    ).data or []
-
-                    current = {r["user_id"]: int(r.get("points") or 0) for r in profs}
-
-                    for uid, delta in delta_by_user.items():
-                        new_total = current.get(uid, 0) + int(delta)
-                        supabase.table("profiles").update(
-                            {"points": max(new_total, 0)}
-                        ).eq("user_id", uid).execute()
+                # ✅ jednotný přepočet leaderboard bodů
+                recompute_profiles_points(supabase, affected_uids)
 
                 supabase.table("matches").update(
                     {"evaluated_at": None}
