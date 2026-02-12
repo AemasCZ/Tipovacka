@@ -268,6 +268,50 @@ def render_team_players_full(team_name: str, match_id: str, side: str, match_day
     atts = [p for p in players if safe_get(p, "role") == "ATT"]
     defs = [p for p in players if safe_get(p, "role") == "DEF"]
 
+    # Aktuální střelec pro tento zápas
+    current_scorer_name = pred_by_match.get(match_id, {}).get("scorer_name")
+
+    # Klíč pro čekající potvrzení (uložen v session_state)
+    confirm_key = f"confirm_scorer_{match_id}"
+
+    # --- Potvrzovací dialog (zobrazí se nad hráči, pokud čeká na potvrzení) ---
+    if confirm_key in st.session_state:
+        pending = st.session_state[confirm_key]
+        new_name = clean_name(safe_get(pending["player"], "full_name", "Neznámý hráč"))
+        new_flag = team_flag(pending["team_name"])
+        old_flag = pred_by_match.get(match_id, {}).get("scorer_flag", "🏳️")
+        st.warning(
+            f"⚠️ Chceš změnit střelce?\n\n"
+            f"**Stávající:** {old_flag} {current_scorer_name}\n\n"
+            f"**Nový:** {new_flag} {new_name}"
+        )
+        col_yes, col_no = st.columns(2)
+        with col_yes:
+            if st.button("✅ Potvrdit změnu", key=f"confirm_yes_{match_id}", type="primary", use_container_width=True):
+                p_pending = st.session_state.pop(confirm_key)
+                save_scorer(p_pending["match_id"], p_pending["player"], p_pending["team_name"], p_pending["match_day"])
+        with col_no:
+            if st.button("❌ Zrušit", key=f"confirm_no_{match_id}", use_container_width=True):
+                del st.session_state[confirm_key]
+                st.rerun()
+        return  # Nezobrazuj hráče, dokud uživatel nerozhodne
+
+    def pick_player(p, tm, role_tag):
+        pid = safe_get(p, "id") or f"{tm}:{clean_name(safe_get(p,'full_name',''))}:{role_tag}"
+        if col.button(player_label(p), key=f"pick_{match_id}_{side}_{role_tag}_{pid}", type="secondary", use_container_width=True):
+            if current_scorer_name:
+                # Střelec už existuje → ulož do session_state a čekej na potvrzení
+                st.session_state[confirm_key] = {
+                    "match_id": match_id,
+                    "player": p,
+                    "team_name": tm,
+                    "match_day": match_day,
+                }
+                st.rerun()
+            else:
+                # Žádný střelec → uložit rovnou
+                save_scorer(match_id, p, tm, match_day)
+
     st.markdown(f"**{team_flag(team_name)} {team_name}**")
     st.markdown("**Útočníci:**")
     if not atts:
@@ -276,9 +320,7 @@ def render_team_players_full(team_name: str, match_id: str, side: str, match_day
         for row in chunks(atts, 3):
             cols = st.columns(3)
             for col, p in zip(cols, row):
-                pid = safe_get(p, "id") or f"{team_name}:{clean_name(safe_get(p,'full_name',''))}:ATT"
-                if col.button(player_label(p), key=f"pick_{match_id}_{side}_ATT_{pid}", type="secondary", use_container_width=True):
-                    save_scorer(match_id, p, team_name, match_day)
+                pick_player(p, team_name, "ATT")
 
     st.write("")
     st.markdown("**Obránci:**")
@@ -288,9 +330,7 @@ def render_team_players_full(team_name: str, match_id: str, side: str, match_day
         for row in chunks(defs, 3):
             cols = st.columns(3)
             for col, p in zip(cols, row):
-                pid = safe_get(p, "id") or f"{team_name}:{clean_name(safe_get(p,'full_name',''))}:DEF"
-                if col.button(player_label(p), key=f"pick_{match_id}_{side}_DEF_{pid}", type="secondary", use_container_width=True):
-                    save_scorer(match_id, p, team_name, match_day)
+                pick_player(p, team_name, "DEF")
 
 def render_scorers_section(match_id: str, home_team: str, away_team: str, match_day: date):
     left, right = st.columns(2)
