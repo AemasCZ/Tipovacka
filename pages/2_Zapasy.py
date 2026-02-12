@@ -287,11 +287,11 @@ def render_team_players_full(team_name: str, match_id: str, side: str, match_day
         )
         col_yes, col_no = st.columns(2)
         with col_yes:
-            if st.button("✅ Potvrdit změnu", key=f"confirm_yes_{match_id}", type="primary", use_container_width=True):
+            if st.button("✅ Potvrdit změnu", key=f"confirm_yes_{match_id}_{side}", type="primary", use_container_width=True):
                 p_pending = st.session_state.pop(confirm_key)
                 save_scorer(p_pending["match_id"], p_pending["player"], p_pending["team_name"], p_pending["match_day"])
         with col_no:
-            if st.button("❌ Zrušit", key=f"confirm_no_{match_id}", use_container_width=True):
+            if st.button("❌ Zrušit", key=f"confirm_no_{match_id}_{side}", use_container_width=True):
                 del st.session_state[confirm_key]
                 st.rerun()
         return  # Nezobrazuj hráče, dokud uživatel nerozhodne
