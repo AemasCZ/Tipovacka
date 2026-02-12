@@ -1,4 +1,3 @@
-# pages/2_Zapasy.py
 import os
 import re
 from datetime import datetime, timezone, date
@@ -85,7 +84,9 @@ def clean_name(x: str) -> str:
         return ""
     return x.strip().lstrip(",").strip()
 
-UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$")
+UUID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+)
 def is_uuid(x) -> bool:
     if not x:
         return False
@@ -181,13 +182,17 @@ def load_my_predictions():
 preds = load_my_predictions()
 pred_by_match = {p["match_id"]: p for p in preds}
 
+# ✅ FIX: grouping do dnů podle lokálního času (Europe/Prague),
+# ale _dt necháváme v UTC pro lock/porovnání.
 by_day = {}
 for m in matches:
-    dt = parse_dt(m["starts_at"])
-    if not dt:
+    dt_utc = parse_dt(m["starts_at"])
+    if not dt_utc:
         continue
-    m["_dt"] = dt
-    d = dt.date()
+
+    m["_dt"] = dt_utc  # UTC pro lock
+    local_dt = dt_utc.astimezone(EVENT_TZ)
+    d = local_dt.date()
     by_day.setdefault(d, []).append(m)
 
 days_sorted = sorted(by_day.keys())
@@ -356,9 +361,13 @@ def render_scorers_section(match_id: str, home_team: str, away_team: str, match_
 
 def match_card(m: dict):
     match_id = m["id"]
-    dt = m["_dt"]
-    match_day = dt.date()
-    time_str = dt.strftime("%H:%M")
+
+    # ✅ _dt držíme v UTC (lock), ale zobrazení děláme v lokálním čase (Europe/Prague)
+    dt_utc = m["_dt"]
+    local_dt = dt_utc.astimezone(EVENT_TZ)
+
+    match_day = local_dt.date()
+    time_str = local_dt.strftime("%H:%M")
 
     p = pred_by_match.get(match_id, {})
     has_tip = match_id in pred_by_match
@@ -377,7 +386,8 @@ def match_card(m: dict):
         else:
             st.markdown("**Střelec:** —")
 
-        if dt <= now:
+        # ✅ porovnání pro lock podle UTC
+        if dt_utc <= now:
             final_home = m.get("final_home_score")
             final_away = m.get("final_away_score")
             if final_home is not None and final_away is not None:
