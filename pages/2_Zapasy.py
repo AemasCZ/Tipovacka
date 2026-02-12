@@ -150,7 +150,7 @@ def day_label(d: date):
 # ----- DB: matches -----
 matches_res = (
     supabase.table("matches")
-    .select("id, home_team, away_team, starts_at")
+    .select("id, home_team, away_team, starts_at, final_home_score, final_away_score")
     .order("starts_at")
     .execute()
 )
@@ -378,7 +378,21 @@ def match_card(m: dict):
             st.markdown("**Střelec:** —")
 
         if dt <= now:
-            st.info("Zápas už začal / proběhl – tip nelze měnit.")
+            final_home = m.get("final_home_score")
+            final_away = m.get("final_away_score")
+            if final_home is not None and final_away is not None:
+                st.markdown(
+                    f"""
+                    <div style="display:inline-block;background:#1b4cff;color:#fff;
+                                border-radius:12px;padding:8px 20px;font-size:1.15rem;
+                                font-weight:800;letter-spacing:0.02em;margin-bottom:6px;">
+                        🏒 Výsledek: {int(final_home)} : {int(final_away)}
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.info("Zápas proběhl – výsledek zatím nezadán.")
             return
 
         st.markdown("### 📝 Tip na výsledek")
