@@ -151,7 +151,7 @@ def day_label(d: date):
 # ----- DB: matches -----
 matches_res = (
     supabase.table("matches")
-    .select("id, home_team, away_team, starts_at, final_home_score, final_away_score")
+    .select("id, home_team, away_team, starts_at, final_home_score, final_away_score, evaluated_at")
     .order("starts_at")
     .execute()
 )
@@ -165,12 +165,13 @@ def load_my_predictions():
     try:
         res = (
             supabase.table("predictions")
-            .select("match_id, home_score, away_score, scorer_player_id, scorer_name, scorer_flag, scorer_team")
+            .select("match_id, home_score, away_score, scorer_player_id, scorer_name, scorer_flag, scorer_team, points_awarded, points_detail")
             .eq("user_id", user_id)
             .execute()
         )
         return res.data or []
     except Exception:
+        # fallback – když by někde v DB chyběly sloupce (starší schema)
         res = (
             supabase.table("predictions")
             .select("match_id, home_score, away_score")
@@ -220,7 +221,6 @@ def load_players_for_team(team_name: str):
                 .select("team_name, full_name, role")
                 .eq("team_name", team_name)
                 .order("role")
-                .order("full_name")
                 .execute()
             )
             return res.data or []
@@ -390,6 +390,8 @@ def match_card(m: dict):
         if dt_utc <= now:
             final_home = m.get("final_home_score")
             final_away = m.get("final_away_score")
+            evaluated_at = m.get("evaluated_at")
+
             if final_home is not None and final_away is not None:
                 st.markdown(
                     f"""
@@ -403,6 +405,27 @@ def match_card(m: dict):
                 )
             else:
                 st.info("Zápas proběhl – výsledek zatím nezadán.")
+                return
+
+            # ✅ NOVĚ: ukaž body za zápas, pokud je vyhodnocený
+            if evaluated_at is not None:
+                if has_tip:
+                    my_points = int(p.get("points_awarded") or 0)
+                    st.markdown(
+                        f"""
+                        <div style="display:inline-block;background:#16a34a;color:#fff;
+                                    border-radius:12px;padding:8px 20px;font-size:1.05rem;
+                                    font-weight:800;letter-spacing:0.02em;margin-top:6px;">
+                            🎯 Získal jsi: {my_points} bodů
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.warning("Netipoval jsi tento zápas → 0 bodů.")
+            else:
+                st.caption("⏳ Zápas ještě není vyhodnocen (admin zatím nepřepočítal body).")
+
             return
 
         st.markdown("### 📝 Tip na výsledek")
